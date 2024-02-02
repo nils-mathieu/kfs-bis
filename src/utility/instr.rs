@@ -32,6 +32,14 @@ pub fn cli() {
     }
 }
 
+/// Sets the interrupt-enable flag.
+#[inline(always)]
+pub fn sti() {
+    unsafe {
+        asm!("sti", options(nomem, nostack, preserves_flags));
+    }
+}
+
 /// Halts the CPU until the next interrupt arrives.
 #[inline(always)]
 pub fn hlt() {
@@ -53,5 +61,13 @@ pub struct DescriptorTablePointer {
 pub unsafe fn lgdt(gdt: &DescriptorTablePointer) {
     unsafe {
         asm!("lgdt [{}]", in(reg) gdt, options(nomem, nostack, preserves_flags));
+    }
+}
+
+/// Loads a new interrupt descriptor table.
+#[inline(always)]
+pub unsafe fn lidt(idt: &DescriptorTablePointer) {
+    unsafe {
+        asm!("lidt [{}]", in(reg) idt, options(nomem, nostack, preserves_flags));
     }
 }

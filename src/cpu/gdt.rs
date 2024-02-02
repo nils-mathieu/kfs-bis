@@ -9,10 +9,9 @@ use crate::utility::instr::{lgdt, DescriptorTablePointer};
 const ADDRESS: *mut u64 = 0x800 as *mut u64;
 
 /// The offset of the kernel data segment within the kernel's GDT.
-const KERNEL_DATA_SEGMENT: u16 = 0x10;
-
+pub const KERNEL_DATA_SEGMENT: u16 = 0x10;
 /// The offset of the kernel code segment within the kernel's GDT.
-const KERNEL_CODE_SEGMENT: u16 = 0x08;
+pub const KERNEL_CODE_SEGMENT: u16 = 0x08;
 
 /// The GDT that will be copied and loaded.
 const GDT: [u64; 7] = [

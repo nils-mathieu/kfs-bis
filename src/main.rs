@@ -4,9 +4,11 @@
 #![feature(maybe_uninit_uninit_array, const_maybe_uninit_uninit_array)]
 #![feature(asm_const)]
 #![feature(decl_macro)]
+#![feature(abi_x86_interrupt)]
 #![allow(dead_code)]
 
 mod cpu;
+mod drivers;
 mod multiboot;
 mod sync;
 mod terminal;
@@ -16,6 +18,8 @@ mod vga;
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
+
+use crate::utility::instr::sti;
 
 use self::sync::Mutex;
 use self::terminal::Terminal;
@@ -35,6 +39,7 @@ pub macro printk($($args:tt)*) {{
 
 /// The header that the bootloader will run to determine the features that the kernel wants.
 #[link_section = ".multiboot_header"]
+#[used]
 static MULTIBOOT_HEADER: multiboot::Header =
     multiboot::Header::new(multiboot::HeaderFlags::MEMORY_MAP);
 
@@ -98,10 +103,17 @@ unsafe extern "C" fn entry_point() {
 ///
 /// This function may only be called once by the `entry_point` function defined above.
 unsafe extern "C" fn entry_point2(_info: u32) {
-    cpu::gdt::init();
-
+    // Initialize the terminal and set up the cursor.
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
+
+    // Initialize the CPU.
+    cpu::gdt::init();
+    cpu::idt::init();
+    drivers::pic::init();
+    drivers::pic::set_irq_mask(drivers::pic::Irqs::all());
+    sti();
+
     printk!("42\n");
 }
 
@@ -110,9 +122,11 @@ unsafe extern "C" fn entry_point2(_info: u32) {
 /// If the control flow of the kernel ever reaches this point, it means that something
 /// went terribly wrong and the kernel may be in an inconsistent state.
 #[panic_handler]
-fn die_and_catch_fire(_info: &PanicInfo) -> ! {
-    cli();
+fn die_and_catch_fire(info: &PanicInfo) -> ! {
+    TERMINAL.lock().set_color(vga::Color::Red);
+    printk!("{info}");
 
+    cli();
     loop {
         hlt();
     }
