@@ -1,0 +1,9 @@
+[package]
+name = "kfs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Nils Mathieu <nmathieu@student.42.fr>"]
+publish = false
+
+[dependencies]
+bitflags = "2"
