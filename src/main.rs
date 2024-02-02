@@ -6,6 +6,7 @@
 #![feature(decl_macro)]
 #![allow(dead_code)]
 
+mod cpu;
 mod multiboot;
 mod sync;
 mod terminal;
@@ -92,7 +93,13 @@ unsafe extern "C" fn entry_point() {
 }
 
 /// The second entry point function of the kernel, called within [`entry_point`].
-extern "C" fn entry_point2(_info: u32) {
+///
+/// # Safety
+///
+/// This function may only be called once by the `entry_point` function defined above.
+unsafe extern "C" fn entry_point2(_info: u32) {
+    cpu::gdt::init();
+
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
     printk!("42\n");
