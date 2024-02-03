@@ -28,7 +28,7 @@ use self::drivers::{pic, ps2, vga};
 use self::multiboot::MultibootInfo;
 use self::state::{Global, MemoryMapEntry, MemoryMapType, SystemInfo, GLOBAL};
 use self::terminal::{ReadLine, Terminal};
-use self::utility::instr::{cli, hlt, sti};
+use self::utility::instr::{cli, hlt, outb, sti};
 use self::utility::{HumanBytes, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
@@ -119,6 +119,11 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     pic::set_irq_mask(!pic::Irqs::KEYBOARD);
 
     // Read the memory map.
+    if !info.flags.intersects(multiboot::InfoFlags::MEMORY_MAP) {
+        TERMINAL.lock().set_color(vga::Color::Red);
+        printk!("ERROR: the bootloader failed to provide a map the available memory");
+        die();
+    }
     let memory_map = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
         .map(MemoryMapEntry::from_multiboot)
         .collect();
@@ -146,7 +151,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
 struct ReadLineImpl;
 
 /// The list of available commands.
-const COMMANDS: &[&str] = &["help", "clear", "font", "system", "panic"];
+const COMMANDS: &[&str] = &["help", "clear", "font", "system", "panic", "restart"];
 
 impl ReadLine for ReadLineImpl {
     fn submit(&mut self, term: &mut Terminal) {
@@ -198,6 +203,9 @@ impl ReadLine for ReadLineImpl {
             b"panic" => {
                 panic!("why would they add this command in the first place???");
             }
+            b"restart" => {
+                reset_cpu();
+            }
             _ => (),
         }
     }
@@ -223,6 +231,7 @@ impl ReadLine for ReadLineImpl {
 /// If the control flow of the kernel ever reaches this point, it means that something
 /// went terribly wrong and the kernel may be in an inconsistent state.
 #[panic_handler]
+#[cold]
 #[inline(never)]
 fn die_and_catch_fire(info: &PanicInfo) -> ! {
     cli();
@@ -260,6 +269,35 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
         let _ = writeln!(term, "> MESSAGE:\n{}", msg);
     }
 
+    wait_any_key();
+    reset_cpu();
+}
+
+/// Function called when something in the kernel goes wrong, but without it being
+/// a bug.
+///
+/// For example, if the kernel cannot initialize itself because of a lack of working
+/// memory, this function will be called.
+///
+/// # Panics
+///
+/// This function panics if the terminal is currently locked.
+pub fn die() -> ! {
+    cli();
+
+    printk!("\nPress any key to restart the computer...\n");
+
+    wait_any_key();
+    reset_cpu();
+}
+
+/// Blocks the execution of the current thread until the user presses any key.
+///
+/// # Notes
+///
+/// This function expects interrupts to be disabled, and that no other part of the
+/// code is accessing the PS2 output buffer.
+fn wait_any_key() {
     loop {
         while !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
             core::hint::spin_loop();
@@ -272,10 +310,15 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
             break;
         }
     }
+}
 
-    term.reset();
+/// Restarts the CPU.
+fn reset_cpu() -> ! {
+    // This is probably just triggering a tripple fault. The documentation online does not
+    // seem to agree on what this does exactly. The proper way to do this would be to
+    // use the ACPI.
+    unsafe { outb(0xCF9, 0xE) };
 
-    // TODO: actually find a way to reset the CPU here.
     loop {
         hlt();
     }

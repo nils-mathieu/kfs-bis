@@ -37,6 +37,10 @@ impl Modifiers {
     }
 
     /// Whether any of the shift keys are currently pressed.
+    ///
+    /// # Remarks
+    ///
+    /// This does not take `CAPS_LOCK` into account. See [`shifted`](Self::shifted) for that.
     #[inline]
     pub fn has_shift(&self) -> bool {
         self.intersects(Modifiers::LEFT_SHIFT | Modifiers::RIGHT_SHIFT)

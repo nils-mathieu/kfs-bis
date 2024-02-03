@@ -4,6 +4,7 @@ The following commands are available:
  - font            print all available characters
  - system          print information about the system
  - panic           cause a kernel panic
+ - restart         restarts the system
 
 The following shortcuts are available:
  - Ctrl + C        clear the command-line
