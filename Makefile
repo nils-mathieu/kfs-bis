@@ -12,11 +12,12 @@ endif
 .PHONY: help
 help:
 	@echo "available commands:"
-	@echo "  make help"
-	@echo "  make build"
-	@echo "  make run"
-	@echo "  make clean"
-	@echo "  make re"
+	@echo "  make help          print this message"
+	@echo "  make build         build the kernel"
+	@echo "  make run           run the kernel with QEMU"
+	@echo "  make print-size    print the size of the kernel"
+	@echo "  make clean         remove intermediate files"
+	@echo "  make re            clean then build the kernel again"
 
 .PHONY: build
 build:
@@ -26,6 +27,11 @@ build:
 run:
 	cargo build $(CARGO_FLAGS)
 	qemu-system-i386 -kernel $(TARGET) -machine type=pc-i440fx-3.1
+
+.PHONY: print-size
+print-size:
+	@cargo build -q $(CARGO_FLAGS)
+	@du -h $(TARGET)
 
 .PHONY: clean
 clean:
