@@ -21,19 +21,19 @@ impl<T, const N: usize> ArrayVec<T, N> {
 
     /// Returns the current length of the vector.
     #[inline(always)]
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.len as usize
     }
 
     /// Returns whether the vector is empty.
     #[inline(always)]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Returns whether the vector is full.
     #[inline(always)]
-    pub fn is_full(&self) -> bool {
+    pub const fn is_full(&self) -> bool {
         self.len() == N
     }
 
@@ -41,6 +41,12 @@ impl<T, const N: usize> ArrayVec<T, N> {
     #[inline]
     pub fn clear(&mut self) {
         while self.pop().is_some() {}
+    }
+
+    /// Returns the capacity of the vector.
+    #[inline(always)]
+    pub const fn capacity(&self) -> usize {
+        N
     }
 
     /// Pops a value from the vector.
@@ -220,6 +226,44 @@ impl<T, const N: usize> ArrayVec<T, N> {
 
         unsafe {
             self.remove_range_unchecked(start, end);
+        }
+    }
+
+    /// Extends the vector with elements from a slice.
+    ///
+    /// # Safety
+    ///
+    /// The vector must have enough capacity to hold the additional elements.
+    pub unsafe fn extend_from_slice_unchecked(&mut self, slice: &[T])
+    where
+        T: Copy,
+    {
+        let len = self.len();
+        core::ptr::copy_nonoverlapping(
+            slice.as_ptr(),
+            self.data.as_mut_ptr().add(len).cast(),
+            slice.len(),
+        );
+        self.len += slice.len() as u8;
+    }
+
+    /// Extends the vector with elements from a slice.
+    ///
+    /// # Panics
+    ///
+    /// This function panics if the vector does not have enough capacity to hold the additional
+    /// elements.
+    pub fn extend_from_slice(&mut self, slice: &[T])
+    where
+        T: Copy,
+    {
+        assert!(
+            self.len() + slice.len() <= self.capacity(),
+            "ArrayVec::extend_from_slice: slice length exceeds capacity"
+        );
+
+        unsafe {
+            self.extend_from_slice_unchecked(slice);
         }
     }
 }

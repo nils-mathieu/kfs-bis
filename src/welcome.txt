@@ -1,0 +1,10 @@
+        :::        ::::::::
+      :+:        :+:    :+:
+    +:+ +:+           +:+
+  +#+  +:+         +#+
++#+#+#+#+#+     +#+
+     #+#      #+#
+    ###     ##########
+
+Welcome to KFS.
+Type `help` for a list of available commands.

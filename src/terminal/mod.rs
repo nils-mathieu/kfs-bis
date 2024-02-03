@@ -234,6 +234,22 @@ impl Terminal {
     pub fn cmdline(&self) -> &[u8] {
         &self.cmdline
     }
+
+    /// Returns the position of the command-line cursor.
+    #[inline(always)]
+    pub fn cmdline_cursor(&self) -> usize {
+        self.cmdline_cursor as usize
+    }
+
+    /// Sets the position of the command-line cursor.
+    #[inline(always)]
+    pub fn set_cmdline_cursor(&mut self, pos: usize) {
+        if pos > self.cmdline.len() {
+            self.cmdline_cursor = self.cmdline.len() as u8;
+        } else {
+            self.cmdline_cursor = pos as u8;
+        }
+    }
 }
 
 impl Write for Terminal {

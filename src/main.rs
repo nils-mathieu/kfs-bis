@@ -18,6 +18,7 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
+use self::drivers::vga::VgaChar;
 use self::drivers::{pic, vga};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, sti};
@@ -111,7 +112,7 @@ unsafe extern "C" fn entry_point2(_info: u32) {
     pic::set_irq_mask(!pic::Irqs::KEYBOARD);
     sti();
 
-    printk!("42\n");
+    let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
 
     loop {
         hlt();
@@ -122,16 +123,50 @@ unsafe extern "C" fn entry_point2(_info: u32) {
 /// A simple implementation of the `ReadLine` trait for the terminal.
 struct ReadLineImpl;
 
+/// The list of available commands.
+const COMMANDS: &[&str] = &["help", "clear", "font"];
+
 impl ReadLine for ReadLineImpl {
     fn submit(&mut self, term: &mut Terminal) {
         match term.cmdline() {
             b"help" => {
+                term.insert_linefeed();
                 let _ = term.write_str(include_str!("help.txt"));
             }
             b"clear" => {
                 term.reset();
             }
+            b"font" => {
+                let _ = term.write_str("\nAvailable characters:\n");
+                for i in VgaChar::iter_all() {
+                    term.write_vga_char(i);
+                }
+
+                let _ = term.write_str("\n\nAvailable colors:\n");
+                for c in vga::Color::iter_all() {
+                    term.set_color(c);
+                    term.write_vga_char(VgaChar::BLOCK);
+                    term.write_vga_char(VgaChar::BLOCK);
+                }
+                term.set_color(vga::Color::White);
+                term.insert_linefeed();
+            }
             _ => (),
+        }
+    }
+
+    fn auto_complete(&mut self, term: &mut Terminal) {
+        if term.cmdline().is_empty() || term.cmdline_cursor() != term.cmdline().len() {
+            return;
+        }
+
+        for candidate in COMMANDS {
+            if candidate.as_bytes().starts_with(term.cmdline()) {
+                term.cmdline_mut().clear();
+                term.cmdline_mut().extend_from_slice(candidate.as_bytes());
+                term.set_cmdline_cursor(term.cmdline().len());
+                term.refresh_cmdline();
+            }
         }
     }
 }

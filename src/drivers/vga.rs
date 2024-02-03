@@ -73,6 +73,7 @@ const ADDRESS: *mut u16 = 0xB8000 as *mut u16;
 
 /// A color supported by the VGA buffer.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+#[repr(u8)]
 pub enum Color {
     Black = 0,
     Blue = 1,
@@ -90,6 +91,14 @@ pub enum Color {
     Pink = 13,
     Yellow = 14,
     White = 15,
+}
+
+impl Color {
+    /// Returns an iterator over all available colors.
+    #[inline]
+    pub fn iter_all() -> impl Iterator<Item = Self> {
+        (0u8..=15u8).map(|i| unsafe { core::mem::transmute(i) })
+    }
 }
 
 /// Updates the appearance of the cursor.
@@ -147,11 +156,15 @@ impl VgaChar {
     /// The character ' '.
     pub const SPACE: Self = Self(unsafe { NonZeroU8::new_unchecked(b' ') });
 
+    /// The character '█'.
+    pub const BLOCK: Self = Self(unsafe { NonZeroU8::new_unchecked(0xDB) });
+
     /// Attempts to convert a [`char`] to a [`VgaChar`].
     pub const fn from_char(c: char) -> Option<Self> {
         match c {
             _ if c.is_ascii_graphic() => Some(Self(unsafe { NonZeroU8::new_unchecked(c as u8) })),
             ' ' => Some(Self::SPACE),
+            '█' => Some(Self::BLOCK),
             _ => None,
         }
     }
@@ -160,5 +173,11 @@ impl VgaChar {
     #[inline(always)]
     pub fn as_u8(&self) -> u8 {
         self.0.get()
+    }
+
+    /// Returns an iterator over all available characters.
+    #[inline]
+    pub fn iter_all() -> impl Iterator<Item = Self> {
+        (1..=255).map(|x| Self(unsafe { NonZeroU8::new_unchecked(x) }))
     }
 }
