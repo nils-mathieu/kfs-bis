@@ -112,6 +112,15 @@ pub struct MultibootInfo {
     /// This pointer point to the first entry in the list, but in order to get from one entry to
     /// the next, the size of the entry must be added to the pointer.
     pub mmap_addr: *mut MemMapEntry,
+    pub _drives_length: u32,
+    pub _drives_addr: u32,
+    pub _config_table: u32,
+    /// The name of the bootloader that loaded the kernel.
+    ///
+    /// This is a null-terminated C-like string.
+    ///
+    /// This is only present if the `flags` field has bit 9 set.
+    pub bootloader_name: *const c_char,
 }
 
 bitflags! {
@@ -130,6 +139,8 @@ bitflags! {
         const MODULES = 1 << 3;
         /// Whether the `mmap_length` and `mmap_addr` fields are set.
         const MEMORY_MAP = 1 << 6;
+        /// Whether the `bootloader_name` field is set.
+        const BOOTLOADER_NAME = 1 << 9;
     }
 }
 

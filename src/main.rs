@@ -19,6 +19,7 @@ mod terminal;
 mod utility;
 
 use core::arch::asm;
+use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
@@ -26,7 +27,7 @@ use core::panic::PanicInfo;
 use self::drivers::vga::VgaChar;
 use self::drivers::{pic, ps2, vga};
 use self::multiboot::MultibootInfo;
-use self::state::{Global, MemoryMapEntry, MemoryMapType, SystemInfo, GLOBAL};
+use self::state::{Global, SystemInfo, GLOBAL};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, outb, sti};
 use self::utility::{HumanBytes, Mutex};
@@ -42,6 +43,18 @@ pub macro printk($($args:tt)*) {{
 	);
 }}
 
+/// Only used in the [`log!`] macro.
+#[doc(hidden)]
+fn __log(msg: core::fmt::Arguments) {
+    #[cfg(feature = "log_serial")]
+    crate::drivers::serial::__log(msg);
+}
+
+/// Logs a message.
+pub macro log($($args:tt)*) {{
+	$crate::__log(::core::format_args!($($args)*));
+}}
+
 /// The header that the bootloader will run to determine the features that the kernel wants.
 #[link_section = ".multiboot_header"]
 #[used]
@@ -49,7 +62,7 @@ static MULTIBOOT_HEADER: multiboot::Header =
     multiboot::Header::new(multiboot::HeaderFlags::MEMORY_MAP);
 
 /// The size of the initial stack. See [`INIT_STACK`] for more information.
-const INIT_STACK_SIZE: usize = 0x2000;
+const INIT_STACK_SIZE: usize = 0x8000;
 /// The initial stack used up until a proper allocator is available. It should not need to be too
 /// large; just enough to get the kernel to a point where it can allocate physical memory
 /// dynamically.
@@ -108,35 +121,53 @@ unsafe extern "C" fn entry_point() {
 ///
 /// This function may only be called once by the `entry_point` function defined above.
 unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
-    // Initialize the terminal and set up the cursor.
+    // Initialize the terminal and set up the cursor. Doing this now avoid as much as possible
+    // screen flickering while the kernel is initializing.
+    log!("Initializing the terminal...\n");
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
+    // Print information about the bootloader.
+    if info.flags.intersects(multiboot::InfoFlags::BOOTLOADER_NAME) {
+        let name = CStr::from_ptr(info.bootloader_name);
+        log!("Bootloader: {:?}\n", name);
+    } else {
+        log!("Bootloader has not provided its name.\n");
+    }
+
     // Initialize the CPU and other hardware components.
+    log!("Initializing the CPU...\n");
     cpu::gdt::init();
     cpu::idt::init();
     pic::init();
     pic::set_irq_mask(!pic::Irqs::KEYBOARD);
 
     // Read the memory map.
+    log!("Reading the memory map...\n");
     if !info.flags.intersects(multiboot::InfoFlags::MEMORY_MAP) {
         TERMINAL.lock().set_color(vga::Color::Red);
-        printk!("ERROR: the bootloader failed to provide a map the available memory");
-        die();
+        die("the bootloader did not provid a memory map");
     }
-    let memory_map = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
-        .map(MemoryMapEntry::from_multiboot)
-        .collect();
+    let available_memory = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
+        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
+        .map(|e| e.len_low as u64 | (e.len_high as u64) << 32)
+        .sum::<u64>();
+    log!(
+        "Found {} of available memory.\n",
+        HumanBytes(available_memory)
+    );
 
     // Write the global state.
+    log!("Initilizing the global state...\n");
     crate::state::GLOBAL
         .set(Global {
-            system_info: SystemInfo { memory_map },
+            system_info: SystemInfo { available_memory },
         })
         .ok()
         .expect("global state already initialized");
 
     // Enable interrupts.
+    log!("Enabling interrupts...\n");
     sti();
 
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
@@ -181,24 +212,13 @@ impl ReadLine for ReadLineImpl {
                 term.insert_linefeed();
             }
             b"system" => {
-                let mut usable_memory = 0;
-
-                let _ = term.write_str("\nMemory map:\n");
-                for entry in glob.system_info.memory_map.iter() {
-                    let _ = writeln!(
-                        term,
-                        "0x{:016} → 0x{:016} ({:?})",
-                        entry.base,
-                        entry.base + entry.length,
-                        entry.ty,
-                    );
-
-                    if entry.ty == MemoryMapType::Available {
-                        usable_memory += entry.length;
-                    }
-                }
-
-                let _ = writeln!(term, "> Usable: {}", HumanBytes(usable_memory));
+                let _ = writeln!(
+                    term,
+                    "\n\
+                  	available memory: {memory}\n\
+                   	",
+                    memory = HumanBytes(glob.system_info.available_memory)
+                );
             }
             b"panic" => {
                 panic!("why would they add this command in the first place???");
@@ -249,6 +269,7 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
     term.clear_cmdline();
 
     // Write a message explaining what happened:
+    log!("\n\nKERNEL PANIC:\n{}", info);
     let _ = writeln!(
         term,
         "\
@@ -282,10 +303,19 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
 /// # Panics
 ///
 /// This function panics if the terminal is currently locked.
-pub fn die() -> ! {
+pub fn die(error: &str) -> ! {
     cli();
 
-    printk!("\nPress any key to restart the computer...\n");
+    {
+        let mut term = TERMINAL.lock();
+        term.set_color(vga::Color::Red);
+        term.clear_cmdline();
+        let _ = writeln!(
+            term,
+            "\nFATAL ERROR: {error}\nPress any key to restart the computer...",
+        );
+        log!("FATAL ERROR: {error}");
+    }
 
     wait_any_key();
     reset_cpu();

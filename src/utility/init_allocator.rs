@@ -1,8 +1,5 @@
 use core::alloc::Layout;
 
-use crate::drivers::vga;
-use crate::TERMINAL;
-
 /// The init allocator is responsible for allocating initial memory for the kernel (before paging is
 /// even enabled).
 ///
@@ -74,13 +71,5 @@ impl InitAllocator {
 
 /// Kills the kernel with an appropriate message.
 fn oom() -> ! {
-    use core::fmt::Write;
-
-    {
-        let mut term = TERMINAL.lock();
-        term.set_color(vga::Color::Red);
-        let _ = writeln!(term, "ERROR: please download more RAM\n");
-    }
-
-    crate::die();
+    crate::die("please download more RAM");
 }

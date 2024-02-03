@@ -5,5 +5,10 @@ edition = "2021"
 authors = ["Nils Mathieu <nmathieu@student.42.fr>"]
 publish = false
 
+[features]
+default = ["log_serial"]
+
+log_serial = []
+
 [dependencies]
 bitflags = "2"
