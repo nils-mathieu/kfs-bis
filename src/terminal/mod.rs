@@ -4,7 +4,7 @@ mod layouts;
 
 use core::fmt::Write;
 
-use crate::vga::{self, Color, VgaBuffer, VgaChar, HEIGHT, WIDTH};
+use crate::drivers::vga::{self, Color, VgaBuffer, VgaChar, HEIGHT, WIDTH};
 
 /// Contains the state of the terminal.
 pub struct Terminal {

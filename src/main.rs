@@ -13,22 +13,20 @@ mod multiboot;
 mod sync;
 mod terminal;
 mod utility;
-mod vga;
 
 use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
-use crate::drivers::{pic, ps2};
+use crate::drivers::{pic, vga};
 use crate::utility::instr::sti;
 
 use self::sync::Mutex;
 use self::terminal::Terminal;
 use self::utility::instr::{cli, hlt};
-use self::vga::VgaBuffer;
 
 /// The global terminal. It needs to be locked in order to be used.
-static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { VgaBuffer::new() }));
+static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
 
 /// Prints a message to the terminal.
 pub macro printk($($args:tt)*) {{
