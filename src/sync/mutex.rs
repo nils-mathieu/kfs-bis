@@ -155,7 +155,7 @@ impl<T: ?Sized> Mutex<T> {
     #[track_caller]
     #[inline]
     pub fn try_lock(&self) -> Result<MutexGuard<T>, CantLock> {
-        self.raw.try_lock().map(|()| MutexGuard {
+        self.raw.try_lock().map(move |()| MutexGuard {
             raw: &self.raw,
             value: unsafe { &mut *self.value.get() },
         })

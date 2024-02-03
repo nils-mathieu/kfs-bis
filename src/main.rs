@@ -19,6 +19,7 @@ use core::arch::asm;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
+use crate::drivers::{pic, ps2};
 use crate::utility::instr::sti;
 
 use self::sync::Mutex;
@@ -110,11 +111,16 @@ unsafe extern "C" fn entry_point2(_info: u32) {
     // Initialize the CPU.
     cpu::gdt::init();
     cpu::idt::init();
-    drivers::pic::init();
-    drivers::pic::set_irq_mask(drivers::pic::Irqs::all());
+    pic::init();
+    pic::set_irq_mask(!pic::Irqs::KEYBOARD);
     sti();
 
     printk!("42\n");
+
+    loop {
+        hlt();
+        TERMINAL.lock().take_buffered_scancodes();
+    }
 }
 
 /// This function is called when something in the kernel panics.

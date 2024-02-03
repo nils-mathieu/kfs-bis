@@ -128,35 +128,35 @@ pub enum Irq {
     /// IRQ 0.
     Timer,
     /// IRQ 1.
-    PS2Keyboard,
+    Keyboard,
     /// IRQ 2.
-    Two,
+    Cascade,
     /// IRQ 3.
-    Three,
+    Com2,
     /// IRQ 4.
-    Four,
+    Com1,
     /// IRQ 5.
-    Five,
+    Lpt2,
     /// IRQ 6.
-    Six,
+    Floppy,
     /// IRQ 7.
-    Seven,
+    Lpt1,
     /// IRQ 8.
-    Eight,
+    RealTimeClock,
     /// IRQ 9.
-    Nine,
+    Periph1,
     /// IRQ 10.
-    Ten,
+    Periph2,
     /// IRQ 11.
-    Eleven,
+    Periph3,
     /// IRQ 12.
-    Twelve,
+    Mouse,
     /// IRQ 13.
-    Thirteen,
+    Fpu,
     /// IRQ 14.
-    Fourteen,
+    Ata1,
     /// IRQ 15.
-    Fifteen,
+    Ata2,
 }
 
 bitflags! {
@@ -166,34 +166,34 @@ bitflags! {
         /// IRQ 0.
         const TIMER = 1 << 0;
         /// IRQ 1.
-        const PS2_KEYBOARD = 1 << 1;
+        const KEYBOARD = 1 << 1;
         /// IRQ 2.
-        const TWO = 1 << 2;
+        const CASCADE = 1 << 2;
         /// IRQ 3.
-        const THREE = 1 << 3;
+        const COM2 = 1 << 3;
         /// IRQ 4.
-        const FOUR = 1 << 4;
+        const COM1 = 1 << 4;
         /// IRQ 5.
-        const FIVE = 1 << 5;
+        const LPT2 = 1 << 5;
         /// IRQ 6.
-        const SIX = 1 << 6;
+        const FLOPPY = 1 << 6;
         /// IRQ 7.
-        const SEVEN = 1 << 7;
+        const LPT1 = 1 << 7;
         /// IRQ 8.
-        const EIGHT = 1 << 8;
+        const REAL_TIME_CLOCK = 1 << 8;
         /// IRQ 9.
-        const NINE = 1 << 9;
+        const PERIPH1 = 1 << 9;
         /// IRQ 10.
-        const TEN = 1 << 10;
+        const PERIPH2 = 1 << 10;
         /// IRQ 11.
-        const ELEVEN = 1 << 11;
+        const PERIPH3 = 1 << 11;
         /// IRQ 12.
-        const TWELVE = 1 << 12;
+        const MOUSE = 1 << 12;
         /// IRQ 13.
-        const THIRTEEN = 1 << 13;
+        const FPU = 1 << 13;
         /// IRQ 14.
-        const FOURTEEN = 1 << 14;
+        const ATA1 = 1 << 14;
         /// IRQ 15.
-        const FIFTEEN = 1 << 15;
+        const ATA2 = 1 << 15;
     }
 }

@@ -1,3 +1,6 @@
+use crate::drivers::{pic, ps2};
+use crate::{printk, TERMINAL};
+
 use super::InterruptStackFrame;
 
 pub extern "x86-interrupt" fn timer(_stack_frame: InterruptStackFrame) {
@@ -5,7 +8,31 @@ pub extern "x86-interrupt" fn timer(_stack_frame: InterruptStackFrame) {
 }
 
 pub extern "x86-interrupt" fn keyboard(_stack_frame: InterruptStackFrame) {
-    panic!("Received a KEYBOARD interrupt (IRQ1).");
+    // Check the status register of the PS/2 controller. When the interrupt is received, the
+    // output buffer should be full. It's probably not necessary to check, but it's probably
+    // a good idea.
+    if !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
+        printk!(
+            "\
+        	WARN: a keyboard interrupt was received (IRQ1), but the output buffer\n\
+         	of the PS/2 controller is empty.\n\
+            "
+        );
+        return;
+    }
+
+    // Send the scancode to the terminal.
+    // Note: reading the scancode is *necessary* to clear the PS/2 controller's output buffer.
+    // Without this, no new interrupts will be received.
+
+    // TODO: buffer the scancode and process it in the main loop. Doing too much processing
+    // in the IRQ handler will probably end up blocking the system.
+    if !TERMINAL.lock().buffer_scancode(ps2::read_data()) {
+        // The terminal buffer is full. We are probably lagging behind.
+        printk!("WARN: the terminal buffer is full; we are dropping scancodes.\n");
+    }
+
+    pic::end_of_interrupt(pic::Irq::Keyboard);
 }
 
 pub extern "x86-interrupt" fn cascade(_stack_frame: InterruptStackFrame) {
@@ -57,7 +84,7 @@ pub extern "x86-interrupt" fn fpu(_stack_frame: InterruptStackFrame) {
 }
 
 pub extern "x86-interrupt" fn ata1(_stack_frame: InterruptStackFrame) {
-    panic!("Received a ATA2 interrupt (IRQ14).");
+    panic!("Received a ATA1 interrupt (IRQ14).");
 }
 
 pub extern "x86-interrupt" fn ata2(_stack_frame: InterruptStackFrame) {

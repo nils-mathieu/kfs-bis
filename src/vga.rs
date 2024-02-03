@@ -1,5 +1,7 @@
 //! This module provides a simple VGA driver for writing characters to the screen.
 
+use core::num::NonZeroU8;
+
 use crate::utility::instr::{inb, outb};
 
 /// Represents the VGA buffer.
@@ -25,9 +27,9 @@ impl VgaBuffer {
     ///
     /// Specifically `x` must be less than `WIDTH` and `y` must be less than `HEIGHT`.
     #[inline]
-    pub unsafe fn putc_unchecked(&mut self, c: u8, x: u32, y: u32, fg: Color, bg: Color) {
+    pub unsafe fn putc_unchecked(&mut self, c: VgaChar, x: u32, y: u32, fg: Color, bg: Color) {
         let offset = y * WIDTH + x;
-        let value = (c as u16) | ((bg as u16) << 12) | ((fg as u16) << 8);
+        let value = (c.as_u8() as u16) | ((bg as u16) << 12) | ((fg as u16) << 8);
 
         unsafe {
             *ADDRESS.add(offset as usize) = value;
@@ -40,7 +42,7 @@ impl VgaBuffer {
     ///
     /// This function fails silently if the provided coordinates are out of bounds.
     #[inline]
-    pub fn putc(&mut self, c: u8, x: u32, y: u32, fg: Color, bg: Color) {
+    pub fn putc(&mut self, c: VgaChar, x: u32, y: u32, fg: Color, bg: Color) {
         if x < WIDTH && y < HEIGHT {
             unsafe {
                 self.putc_unchecked(c, x, y, fg, bg);
@@ -134,5 +136,29 @@ pub fn cursor_move(x: u32, y: u32) {
         outb(0x3D5, pos as u8);
         outb(0x3D4, 0x0E);
         outb(0x3D5, (pos >> 8) as u8);
+    }
+}
+
+/// A character in the VGA buffer.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+pub struct VgaChar(NonZeroU8);
+
+impl VgaChar {
+    /// The character ' '.
+    pub const SPACE: Self = Self(unsafe { NonZeroU8::new_unchecked(b' ') });
+
+    /// Attempts to convert a [`char`] to a [`VgaChar`].
+    pub const fn from_char(c: char) -> Option<Self> {
+        match c {
+            _ if c.is_ascii_graphic() => Some(Self(unsafe { NonZeroU8::new_unchecked(c as u8) })),
+            ' ' => Some(Self::SPACE),
+            _ => None,
+        }
+    }
+
+    /// Returns the underlying character as a byte.
+    #[inline(always)]
+    pub fn as_u8(&self) -> u8 {
+        self.0.get()
     }
 }

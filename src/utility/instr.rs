@@ -2,6 +2,8 @@
 
 use core::arch::asm;
 
+use bitflags::bitflags;
+
 /// Writes a value to the specified I/O port.
 ///
 /// # Safety
@@ -69,5 +71,41 @@ pub unsafe fn lgdt(gdt: &DescriptorTablePointer) {
 pub unsafe fn lidt(idt: &DescriptorTablePointer) {
     unsafe {
         asm!("lidt [{}]", in(reg) idt, options(nomem, nostack, preserves_flags));
+    }
+}
+
+/// Reads the current value of the RFLAGS register.
+pub fn read_rflags() -> RFlags {
+    let mut value: u32;
+    unsafe {
+        asm!("pushf; pop {}", out(reg) value, options(nomem, preserves_flags));
+    }
+    RFlags::from_bits_retain(value)
+}
+
+bitflags! {
+    /// The flags in the RFLAGS register.
+    #[derive(Default, Clone, Copy)]
+    pub struct RFlags: u32 {
+        const CARRY = 1 << 0;
+        const PARITY = 1 << 2;
+        const ADJUST = 1 << 4;
+        const ZERO = 1 << 6;
+        const SIGN = 1 << 7;
+        const TRAP = 1 << 8;
+        const INTERRUPT = 1 << 9;
+        const DIRECTION = 1 << 10;
+        const OVERFLOW = 1 << 11;
+        const IOPL0 = 0b00 << 12;
+        const IOPL1 = 0b01 << 12;
+        const IOPL2 = 0b10 << 12;
+        const IOPL3 = 0b11 << 12;
+        const NESTED_TASK = 1 << 14;
+        const RESUME = 1 << 16;
+        const VIRTUAL8086 = 1 << 17;
+        const ALIGNMENT_CHECK = 1 << 18;
+        const VIRTUAL_INTERRUPT = 1 << 19;
+        const VIRTUAL_INTERRUPT_PENDING = 1 << 20;
+        const ID = 1 << 21;
     }
 }
