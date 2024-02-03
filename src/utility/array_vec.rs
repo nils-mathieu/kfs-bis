@@ -283,3 +283,11 @@ impl<T, const N: usize> DerefMut for ArrayVec<T, N> {
         unsafe { core::slice::from_raw_parts_mut(self.data.as_mut_ptr() as *mut T, self.len()) }
     }
 }
+
+impl<T, const N: usize> FromIterator<T> for ArrayVec<T, N> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut this = Self::new();
+        iter.into_iter().for_each(|x| this.push(x));
+        this
+    }
+}

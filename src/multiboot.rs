@@ -174,8 +174,6 @@ pub struct MemMapType(pub u32);
 impl MemMapType {
     /// The memory region is available for general purpose use.
     pub const AVAILABLE: MemMapType = MemMapType(1);
-    /// The memory region is reserved for the kernel.
-    pub const RESERVED: MemMapType = MemMapType(2);
     /// The memory region is useable but holds ACPI information.
     pub const ACPI_RECLAIMABLE: MemMapType = MemMapType(3);
     /// Memory that must be preserved when the system is hibernated or suspended.
@@ -184,15 +182,36 @@ impl MemMapType {
     pub const DEFECTIVE: MemMapType = MemMapType(5);
 }
 
-impl Debug for MemMapType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match *self {
-            Self::AVAILABLE => write!(f, "AVAILABLE"),
-            Self::RESERVED => write!(f, "RESERVED"),
-            Self::ACPI_RECLAIMABLE => write!(f, "ACPI_RECLAIMABLE"),
-            Self::PRESERVED => write!(f, "PRESERVED"),
-            Self::DEFECTIVE => write!(f, "DEFECTIVE"),
-            _ => write!(f, "MemMapType({})", self.0),
+/// Returns an iterator over the memory map entries.
+///
+/// # Arguments
+///
+/// - `addr`: The value of the `mmap_addr` field in the multiboot info structure.
+///
+/// - `length`: The value of the `mmap_length` field of the multiboot info structure.
+///
+/// # Safety
+///
+/// The provided arguments must be valid as specified in the multiboot protocol. The memory
+/// they reference must remain valid and borrowed for the lifetime `'a`.
+pub unsafe fn iter_memory_map<'a>(
+    addr: *const MemMapEntry,
+    length: u32,
+) -> impl Iterator<Item = &'a MemMapEntry> {
+    let mut cur = addr;
+    let mut total_offset = 0usize;
+
+    core::iter::from_fn(move || {
+        if total_offset >= length as usize {
+            return None;
         }
-    }
+
+        let ret = &*cur;
+
+        let skip_size = ret.size as usize + 4;
+        total_offset += skip_size;
+        cur = cur.byte_add(skip_size);
+
+        Some(ret)
+    })
 }

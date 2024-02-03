@@ -1,15 +1,20 @@
 #![no_std]
 #![no_main]
-#![feature(naked_functions)]
-#![feature(maybe_uninit_uninit_array, const_maybe_uninit_uninit_array)]
-#![feature(asm_const)]
-#![feature(decl_macro)]
-#![feature(abi_x86_interrupt)]
+#![feature(
+    naked_functions,
+    maybe_uninit_uninit_array,
+    const_maybe_uninit_uninit_array,
+    asm_const,
+    decl_macro,
+    abi_x86_interrupt,
+    panic_info_message
+)]
 #![allow(dead_code)]
 
 mod cpu;
 mod drivers;
 mod multiboot;
+mod state;
 mod terminal;
 mod utility;
 
@@ -19,11 +24,12 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use self::drivers::vga::VgaChar;
-use self::drivers::{pic, vga};
-use self::multiboot::{MemMapEntry, MultibootInfo};
+use self::drivers::{pic, ps2, vga};
+use self::multiboot::{MemMapType, MultibootInfo};
+use self::state::{Global, MemoryMapEntry, MemoryMapType, SystemInfo, GLOBAL};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, sti};
-use self::utility::Mutex;
+use self::utility::{ArrayVec, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
 static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
@@ -106,18 +112,24 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
-    // Initialize the CPU.
+    // Initialize the CPU and other hardware components.
     cpu::gdt::init();
     cpu::idt::init();
     pic::init();
     pic::set_irq_mask(!pic::Irqs::KEYBOARD);
 
     // Read the memory map.
-    for entry in iter_memory_map(info) {
-        let addr = entry.addr_low as u64 | (entry.addr_high as u64) << 32;
-        let len = entry.len_low as u64 | (entry.len_high as u64) << 32;
-        printk!("{:#x} => {:#x}   {:?}\n", addr, addr + len, entry.ty);
-    }
+    let memory_map = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
+        .map(MemoryMapEntry::from_multiboot)
+        .collect();
+
+    // Write the global state.
+    crate::state::GLOBAL
+        .set(Global {
+            system_info: SystemInfo { memory_map },
+        })
+        .ok()
+        .expect("global state already initialized");
 
     // Enable interrupts.
     sti();
@@ -134,10 +146,12 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
 struct ReadLineImpl;
 
 /// The list of available commands.
-const COMMANDS: &[&str] = &["help", "clear", "font"];
+const COMMANDS: &[&str] = &["help", "clear", "font", "system", "panic"];
 
 impl ReadLine for ReadLineImpl {
     fn submit(&mut self, term: &mut Terminal) {
+        let glob = GLOBAL.get().unwrap();
+
         match term.cmdline() {
             b"help" => {
                 term.insert_linefeed();
@@ -161,6 +175,21 @@ impl ReadLine for ReadLineImpl {
                 term.set_color(vga::Color::White);
                 term.insert_linefeed();
             }
+            b"system" => {
+                let _ = term.write_str("\nMemory map:\n");
+                for entry in glob.system_info.memory_map.iter() {
+                    let _ = writeln!(
+                        term,
+                        "0x{:016} → 0x{:016} ({:?})",
+                        entry.base,
+                        entry.base + entry.length,
+                        entry.ty,
+                    );
+                }
+            }
+            b"panic" => {
+                panic!("why would they add this command in the first place???");
+            }
             _ => (),
         }
     }
@@ -179,31 +208,6 @@ impl ReadLine for ReadLineImpl {
             }
         }
     }
-}
-
-/// Returns an iterator over the memory map entries.
-///
-/// # Safety
-///
-/// The provided info structure must be properly initialized as per the multiboot protocol
-/// specification.
-unsafe fn iter_memory_map(info: &MultibootInfo) -> impl '_ + Iterator<Item = &'_ MemMapEntry> {
-    let mut cur = info.mmap_addr;
-    let mut total_offset = 0usize;
-
-    core::iter::from_fn(move || {
-        if total_offset >= info.mmap_length as usize {
-            return None;
-        }
-
-        let ret = &*cur;
-
-        let skip_size = ret.size as usize + 4;
-        total_offset += skip_size;
-        cur = cur.byte_add(skip_size);
-
-        Some(ret)
-    })
 }
 
 /// This function is called when something in the kernel panics.
@@ -226,8 +230,44 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
     vga::cursor_hide();
     term.set_color(vga::Color::Red);
     term.clear_cmdline();
-    let _ = writeln!(term, "{info}");
 
+    // Write a message explaining what happened:
+    let _ = writeln!(
+        term,
+        "\
+      	The kernel panicked unexpectedly. This is a serious bug in the operating\n\
+        system. Press any key in order to restart the computer.\n\
+        \n\
+        Please report this bug at: https://github.com/nils-mathieu/kfs
+        \n\
+        Additional information:\
+        "
+    );
+
+    if let Some(location) = info.location() {
+        let _ = writeln!(term, "> LOCATION: {}", location);
+    }
+
+    if let Some(msg) = info.message() {
+        let _ = writeln!(term, "> MESSAGE:\n{}", msg);
+    }
+
+    loop {
+        while !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
+            core::hint::spin_loop();
+        }
+
+        // If the most significant bit is set, then the scancode is a MAKE code
+        // instead of a BREAK code. This avoid continuing unintentionally when
+        // the user releases a key.
+        if ps2::read_data() & 0x80 == 0 {
+            break;
+        }
+    }
+
+    term.reset();
+
+    // TODO: actually find a way to reset the CPU here.
     loop {
         hlt();
     }

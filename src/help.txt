@@ -2,6 +2,8 @@ The following commands are available:
  - help            display this help
  - clear           clear the console
  - font            print all available characters
+ - system          print information about the system
+ - panic           cause a kernel panic
 
 The following shortcuts are available:
  - Ctrl + C        clear the command-line

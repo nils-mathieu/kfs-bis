@@ -156,6 +156,11 @@ impl VgaChar {
     /// The character ' '.
     pub const SPACE: Self = Self(unsafe { NonZeroU8::new_unchecked(b' ') });
 
+    /// The character '←'.
+    pub const ARROW_LEFT: Self = Self(unsafe { NonZeroU8::new_unchecked(0x19) });
+    /// The character '→'.
+    pub const ARROW_RIGHT: Self = Self(unsafe { NonZeroU8::new_unchecked(0x1A) });
+
     /// The character '█'.
     pub const BLOCK: Self = Self(unsafe { NonZeroU8::new_unchecked(0xDB) });
 
@@ -165,6 +170,8 @@ impl VgaChar {
             _ if c.is_ascii_graphic() => Some(Self(unsafe { NonZeroU8::new_unchecked(c as u8) })),
             ' ' => Some(Self::SPACE),
             '█' => Some(Self::BLOCK),
+            '←' => Some(Self::ARROW_LEFT),
+            '→' => Some(Self::ARROW_RIGHT),
             _ => None,
         }
     }
