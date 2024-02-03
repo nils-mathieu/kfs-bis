@@ -9,8 +9,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use crate::utility::RestoreInterrupts;
-
 /// An error that might occur while attempting to lock a mutex.
 pub struct CantLock {
     /// The location at which the mutex was locked.

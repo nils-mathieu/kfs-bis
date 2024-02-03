@@ -18,7 +18,7 @@ use core::panic::PanicInfo;
 
 use self::drivers::{ps2, vga};
 use self::terminal::{ReadLine, Terminal};
-use self::utility::instr::{cli, hlt, sti};
+use self::utility::instr::{cli, hlt};
 use self::utility::Mutex;
 
 /// The global terminal. It needs to be locked in order to be used.
