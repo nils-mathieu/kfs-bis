@@ -296,7 +296,8 @@ pub fn die() -> ! {
 /// # Notes
 ///
 /// This function expects interrupts to be disabled, and that no other part of the
-/// code is accessing the PS2 output buffer.
+/// code is accessing the PS2 output buffer. Failing to meet those conditions might
+/// prevent the function from ever returning.
 fn wait_any_key() {
     loop {
         while !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
