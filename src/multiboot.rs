@@ -1,5 +1,8 @@
 //! This module provides definitions of the types defined in the multiboot protocol specification.
 
+use core::ffi::c_char;
+use core::fmt::Debug;
+
 use bitflags::bitflags;
 
 /// The magic number that the bootloader uses to determine whether the kernel is
@@ -42,5 +45,154 @@ bitflags! {
         const ALIGN_MODULES = 1 << 0;
         /// Requests the bootloader to provide information about the memory map.
         const MEMORY_MAP = 1 << 1;
+    }
+}
+
+/// Information that the bootloader will provide to the kernel.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct MultibootInfo {
+    /// A bunch of flags.
+    pub flags: InfoFlags,
+    /// The amount of lower memory available, in kilobytes.
+    ///
+    /// Lower memory starts at address 0 and ends at address 1 MiB. The maximum value for this
+    /// field is 640 KiB.
+    ///
+    /// This is only available when bit 0 of `flags` is set.
+    pub mem_lower: u32,
+    /// The amount of upper memory available, in kilobytes.
+    ///
+    /// Upper memory starts at address 1 MiB.
+    ///
+    /// This is only available when bit 0 of `flags` is set.
+    pub mem_upper: u32,
+    /// The boot device that the bootloader loaded the kernel from.
+    ///
+    /// If the bootloader did not load the Kernel from a BIOS disk, this field is not available.
+    ///
+    /// The boot device is layed out as follows:
+    ///
+    /// +--------------+--------------+--------------+--------------+
+    /// | 31 - 24      | 23 - 16      | 15 - 8       | 7 - 0        |
+    /// +--------------+--------------+--------------+--------------+
+    /// | part3        | part2        | part1        | drive number |
+    /// +--------------+--------------+--------------+--------------+
+    ///
+    /// This field is only available when bit 1 of `flags` is set.
+    pub boot_device: u32,
+    /// The command line that the bootloader passed to the kernel.
+    ///
+    /// This is the physical address of a null-terminated string.
+    ///
+    /// This field is only available when bit 2 of `flags` is set.
+    pub cmdline: *const c_char,
+    /// The number of boot modules loaded by the bootloader.
+    ///
+    /// This is only available when bit 3 of `flags` is set, but note that this field might still
+    /// be 0 even if bit 3 is set.
+    pub mods_count: u32,
+    /// The physical address of the first module structure. Subsequent module structures are
+    /// located at increasing addresses.
+    ///
+    /// This is only available when bit 3 of `flags` is set.
+    pub mods_addr: *mut Module,
+    pub _syms: [u32; 4],
+    /// The number of bytes in the memory map provided by the bootloader.
+    ///
+    /// This is only set when bit 6 of `flags` is set.
+    pub mmap_length: u32,
+    /// The address of the first entry in the memory map provided by the bootloader. Subsequent
+    /// entries are located at increasing addresses.
+    ///
+    /// This is only set when bit 6 of `flags` is set.
+    ///
+    /// # Iteration
+    ///
+    /// This pointer point to the first entry in the list, but in order to get from one entry to
+    /// the next, the size of the entry must be added to the pointer.
+    pub mmap_addr: *mut MemMapEntry,
+}
+
+bitflags! {
+    /// A bunch of flags that indicate which fields of [`Info`] have been filled by the
+    /// bootloader.
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct InfoFlags: u32 {
+        /// Whether the `mem_lower` and `mem_upper` fields are set.
+        const MEMORY = 1 << 0;
+        /// Whether the `boot_device` field is set.
+        const BOOT_DEVICE = 1 << 1;
+        /// Whether the `cmdline` field is set.
+        const CMDLINE = 1 << 2;
+        /// Whether the `mods_count` and `mods_addr` fields are set.
+        const MODULES = 1 << 3;
+        /// Whether the `mmap_length` and `mmap_addr` fields are set.
+        const MEMORY_MAP = 1 << 6;
+    }
+}
+
+/// Information about a loaded boot module.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct Module {
+    /// The base physical address of the module.
+    pub mod_start: u32,
+    /// The end physical address of the module.
+    pub mod_end: u32,
+    /// A pointer to a string that represents the command line that the bootloader passed to the
+    /// module.
+    pub string: *const c_char,
+    /// A reserved field.
+    pub _reserved: u32,
+}
+
+/// An entry in the memory map.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MemMapEntry {
+    /// The size of the structure, not including this field.
+    pub size: u32,
+    /// The lower 32 bits of the starting address of the memory region.
+    pub addr_low: u32,
+    /// The higher 32 bits of the starting address of the memory region.
+    pub addr_high: u32,
+    /// The lower 32 bits of the length of the memory region.
+    pub len_low: u32,
+    /// The higher 32 bits of the length of the memory region.
+    pub len_high: u32,
+    /// The type of the memory region.
+    pub ty: MemMapType,
+}
+
+/// The type of the memory map entry.
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct MemMapType(pub u32);
+
+impl MemMapType {
+    /// The memory region is available for general purpose use.
+    pub const AVAILABLE: MemMapType = MemMapType(1);
+    /// The memory region is reserved for the kernel.
+    pub const RESERVED: MemMapType = MemMapType(2);
+    /// The memory region is useable but holds ACPI information.
+    pub const ACPI_RECLAIMABLE: MemMapType = MemMapType(3);
+    /// Memory that must be preserved when the system is hibernated or suspended.
+    pub const PRESERVED: MemMapType = MemMapType(4);
+    /// The memory region is defective and should not be used.
+    pub const DEFECTIVE: MemMapType = MemMapType(5);
+}
+
+impl Debug for MemMapType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match *self {
+            Self::AVAILABLE => write!(f, "AVAILABLE"),
+            Self::RESERVED => write!(f, "RESERVED"),
+            Self::ACPI_RECLAIMABLE => write!(f, "ACPI_RECLAIMABLE"),
+            Self::PRESERVED => write!(f, "PRESERVED"),
+            Self::DEFECTIVE => write!(f, "DEFECTIVE"),
+            _ => write!(f, "MemMapType({})", self.0),
+        }
     }
 }

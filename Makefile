@@ -26,7 +26,7 @@ build:
 .PHONY: run
 run:
 	cargo build $(CARGO_FLAGS)
-	qemu-system-i386 -kernel $(TARGET) -machine type=pc-i440fx-3.1
+	qemu-system-i386 -kernel $(TARGET) -machine type=pc-i440fx-3.1 -m 2G -serial stdio
 
 .PHONY: print-size
 print-size:

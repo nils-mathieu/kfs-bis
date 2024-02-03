@@ -20,6 +20,7 @@ use core::panic::PanicInfo;
 
 use self::drivers::vga::VgaChar;
 use self::drivers::{pic, vga};
+use self::multiboot::{MemMapEntry, MultibootInfo};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, sti};
 use self::utility::Mutex;
@@ -100,7 +101,7 @@ unsafe extern "C" fn entry_point() {
 /// # Safety
 ///
 /// This function may only be called once by the `entry_point` function defined above.
-unsafe extern "C" fn entry_point2(_info: u32) {
+unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     // Initialize the terminal and set up the cursor.
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
@@ -110,6 +111,15 @@ unsafe extern "C" fn entry_point2(_info: u32) {
     cpu::idt::init();
     pic::init();
     pic::set_irq_mask(!pic::Irqs::KEYBOARD);
+
+    // Read the memory map.
+    for entry in iter_memory_map(info) {
+        let addr = entry.addr_low as u64 | (entry.addr_high as u64) << 32;
+        let len = entry.len_low as u64 | (entry.len_high as u64) << 32;
+        printk!("{:#x} => {:#x}   {:?}\n", addr, addr + len, entry.ty);
+    }
+
+    // Enable interrupts.
     sti();
 
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
@@ -169,6 +179,31 @@ impl ReadLine for ReadLineImpl {
             }
         }
     }
+}
+
+/// Returns an iterator over the memory map entries.
+///
+/// # Safety
+///
+/// The provided info structure must be properly initialized as per the multiboot protocol
+/// specification.
+unsafe fn iter_memory_map(info: &MultibootInfo) -> impl '_ + Iterator<Item = &'_ MemMapEntry> {
+    let mut cur = info.mmap_addr;
+    let mut total_offset = 0usize;
+
+    core::iter::from_fn(move || {
+        if total_offset >= info.mmap_length as usize {
+            return None;
+        }
+
+        let ret = &*cur;
+
+        let skip_size = ret.size as usize + 4;
+        total_offset += skip_size;
+        cur = cur.byte_add(skip_size);
+
+        Some(ret)
+    })
 }
 
 /// This function is called when something in the kernel panics.
