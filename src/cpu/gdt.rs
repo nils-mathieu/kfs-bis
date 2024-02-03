@@ -1,7 +1,6 @@
 //! Defines the Global Descriptor Table that the kernel will use.
 
 use core::arch::asm;
-use core::mem::size_of_val;
 
 use crate::utility::instr::{lgdt, DescriptorTablePointer};
 
@@ -31,6 +30,12 @@ const GDT: [u64; 7] = [
     0x00cff2000000ffff,
 ];
 
+/// The GDTP that will be loaded with `lgdt`.
+const GDTP: DescriptorTablePointer = DescriptorTablePointer {
+    limit: 7 * 8 - 1,
+    base: ADDRESS as *mut (),
+};
+
 /// Installs the kernel's GDT.
 ///
 /// # Safety
@@ -39,10 +44,7 @@ const GDT: [u64; 7] = [
 pub unsafe fn init() {
     core::ptr::copy_nonoverlapping(GDT.as_ptr(), ADDRESS, 7);
 
-    lgdt(&DescriptorTablePointer {
-        limit: size_of_val(&GDT) as u16 - 1,
-        base: ADDRESS as u32,
-    });
+    lgdt(&GDTP);
 
     // Reload the data segment registers.
     asm!(

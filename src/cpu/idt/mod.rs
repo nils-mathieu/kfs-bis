@@ -12,6 +12,12 @@ use super::gdt::KERNEL_CODE_SEGMENT;
 /// This array must be properly initialized before it can be used.
 static mut IDT: [u64; 256] = [0; 256];
 
+/// The pointer to the IDT that will be loaded with `lidt`.
+static IDTP: DescriptorTablePointer = DescriptorTablePointer {
+    limit: 256 * 8 - 1,
+    base: unsafe { core::ptr::addr_of!(IDT) as *mut () },
+};
+
 /// The offset of the PIC.
 ///
 /// The following 32 interrupts (32 to 63) are reserved for the PIC.
@@ -81,10 +87,7 @@ pub fn init() {
         IDT[46] = create_gate_descriptor(true, pic::ata1 as usize);
         IDT[47] = create_gate_descriptor(true, pic::ata2 as usize);
 
-        lidt(&DescriptorTablePointer {
-            limit: 8 * 256 - 1,
-            base: IDT.as_ptr() as u32,
-        });
+        lidt(&IDTP);
     }
 }
 

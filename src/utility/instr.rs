@@ -55,8 +55,11 @@ pub fn hlt() {
 #[repr(packed, C)]
 pub struct DescriptorTablePointer {
     pub limit: u16,
-    pub base: u32,
+    pub base: *const (),
 }
+
+unsafe impl Send for DescriptorTablePointer {}
+unsafe impl Sync for DescriptorTablePointer {}
 
 /// Loads a new global descriptor table.
 #[inline(always)]
@@ -72,6 +75,28 @@ pub unsafe fn lidt(idt: &DescriptorTablePointer) {
     unsafe {
         asm!("lidt [{}]", in(reg) idt, options(nomem, nostack, preserves_flags));
     }
+}
+
+/// Loads the current GDT.
+#[inline(always)]
+pub unsafe fn sgdt() -> DescriptorTablePointer {
+    let mut gdt = DescriptorTablePointer {
+        limit: 0,
+        base: core::ptr::null(),
+    };
+    asm!("sgdt [{}]", in(reg) &mut gdt, options(nostack, preserves_flags));
+    gdt
+}
+
+/// Loads the current IDT.
+#[inline(always)]
+pub unsafe fn sidt() -> DescriptorTablePointer {
+    let mut idt = DescriptorTablePointer {
+        limit: 0,
+        base: core::ptr::null(),
+    };
+    asm!("sidt [{}]", in(reg) &mut idt, options(nostack, preserves_flags));
+    idt
 }
 
 bitflags! {
