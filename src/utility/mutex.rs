@@ -9,8 +9,6 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
-use crate::utility::RestoreInterrupts;
-
 /// An error that might occur while attempting to lock a mutex.
 pub struct CantLock {
     /// The location at which the mutex was locked.
@@ -157,12 +155,9 @@ impl<T: ?Sized> Mutex<T> {
     #[track_caller]
     #[inline]
     pub fn try_lock(&self) -> Result<MutexGuard<T>, CantLock> {
-        let without_interrupts = RestoreInterrupts::without_interrupts();
-
         self.raw.try_lock().map(move |()| MutexGuard {
             raw: &self.raw,
             value: unsafe { &mut *self.value.get() },
-            without_interrupts,
         })
     }
 
@@ -197,9 +192,6 @@ pub struct MutexGuard<'a, T: ?Sized> {
     raw: &'a RawMutex,
     /// The value protected by the lock.
     value: &'a mut T,
-    /// If interrupts were previously disabled, this will restore the previous state
-    /// once the guard is dropped.
-    without_interrupts: Option<RestoreInterrupts>,
 }
 
 impl<T: ?Sized> Deref for MutexGuard<'_, T> {
