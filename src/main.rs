@@ -25,11 +25,11 @@ use core::panic::PanicInfo;
 
 use self::drivers::vga::VgaChar;
 use self::drivers::{pic, ps2, vga};
-use self::multiboot::{MemMapType, MultibootInfo};
+use self::multiboot::MultibootInfo;
 use self::state::{Global, MemoryMapEntry, MemoryMapType, SystemInfo, GLOBAL};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, sti};
-use self::utility::{ArrayVec, Mutex};
+use self::utility::{HumanBytes, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
 static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
@@ -176,6 +176,8 @@ impl ReadLine for ReadLineImpl {
                 term.insert_linefeed();
             }
             b"system" => {
+                let mut usable_memory = 0;
+
                 let _ = term.write_str("\nMemory map:\n");
                 for entry in glob.system_info.memory_map.iter() {
                     let _ = writeln!(
@@ -185,7 +187,13 @@ impl ReadLine for ReadLineImpl {
                         entry.base + entry.length,
                         entry.ty,
                     );
+
+                    if entry.ty == MemoryMapType::Available {
+                        usable_memory += entry.length;
+                    }
                 }
+
+                let _ = writeln!(term, "> Usable: {}", HumanBytes(usable_memory));
             }
             b"panic" => {
                 panic!("why would they add this command in the first place???");
