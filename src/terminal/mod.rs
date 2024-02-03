@@ -5,6 +5,7 @@ mod layouts;
 use core::fmt::Write;
 
 use crate::drivers::vga::{self, Color, VgaBuffer, VgaChar, HEIGHT, WIDTH};
+use crate::utility::ArrayVec;
 
 /// Contains the state of the terminal.
 pub struct Terminal {
@@ -22,18 +23,14 @@ pub struct Terminal {
     foreground: Color,
 
     /// The current command line.
-    cmdline: [VgaChar; WIDTH as usize],
-    /// The current length of the command line.
-    cmdline_len: u8,
+    cmdline: ArrayVec<u8, { WIDTH as usize }>,
     /// The position of the user's cursor within the command-line.
     cmdline_cursor: u8,
 
     /// A bunch of scan-codes that have been received from the keyboard.
     ///
     /// This is a bounded queue.
-    scancode_buffer: [u8; 8],
-    /// The number of scan-codes currently in the buffer.
-    scancode_buffer_len: u8,
+    scancode_buffer: ArrayVec<u8, 8>,
 
     layout: layouts::Qwerty,
 }
@@ -46,12 +43,10 @@ impl Terminal {
             cursor: 0,
             foreground: Color::White,
 
-            cmdline: [VgaChar::SPACE; WIDTH as usize],
-            cmdline_len: 0,
+            cmdline: ArrayVec::new(),
             cmdline_cursor: 0,
 
-            scancode_buffer: [0; 8],
-            scancode_buffer_len: 0,
+            scancode_buffer: ArrayVec::new(),
 
             layout: layouts::Qwerty::new(),
         }
@@ -59,9 +54,20 @@ impl Terminal {
 
     /// Re-initializes the terminal.
     pub fn reset(&mut self) {
-        self.cmdline_len = 0;
+        self.cmdline.clear();
         self.cursor = 0;
         self.screen.buffer_mut().fill(CLEAR_VALUE);
+        vga::cursor_move(0, HEIGHT - 1);
+    }
+
+    pub fn clear_cmdline(&mut self) {
+        self.cmdline.clear();
+        self.cmdline_cursor = 0;
+
+        let w = WIDTH as usize;
+        let h = HEIGHT as usize;
+        self.screen.buffer_mut()[w * (h - 1)..].fill(CLEAR_VALUE);
+
         vga::cursor_move(0, HEIGHT - 1);
     }
 
@@ -111,10 +117,11 @@ impl Terminal {
     ///
     /// This function should be called whenever the command-line is modified.
     pub fn refresh_cmdline(&mut self) {
-        for i in 0..self.cmdline_len {
+        for (x, &c) in self.cmdline.iter().enumerate() {
             self.screen.putc(
-                self.cmdline[i as usize],
-                i as u32,
+                VgaChar::from_char(c as char)
+                    .expect("found an invalid VGA character in the command line"),
+                x as u32,
                 HEIGHT - 1,
                 Color::White,
                 Color::Black,
@@ -122,7 +129,7 @@ impl Terminal {
         }
         let w = WIDTH as usize;
         let h = HEIGHT as usize;
-        let len = self.cmdline_len as usize;
+        let len = self.cmdline.len();
         self.screen.buffer_mut()[w * (h - 1) + len..].fill(CLEAR_VALUE);
         vga::cursor_move(self.cmdline_cursor as u32, HEIGHT - 1);
     }
@@ -132,19 +139,16 @@ impl Terminal {
     /// # Returns
     ///
     /// This function returns whether the character could be inserted into the command-line.
-    pub fn type_in(&mut self, c: VgaChar) -> bool {
-        if self.cmdline_len == self.cmdline.len() as u8 {
+    pub fn type_in(&mut self, c: u8) -> bool {
+        if self
+            .cmdline
+            .try_insert(self.cmdline_cursor as usize, c)
+            .is_err()
+        {
             return false;
         }
 
-        let cur = self.cmdline_cursor as usize;
-        let len = self.cmdline_len as usize;
-        self.cmdline.copy_within(cur..len, cur + 1);
-        self.cmdline[cur] = c;
-
         self.cmdline_cursor += 1;
-        self.cmdline_len += 1;
-
         self.refresh_cmdline();
 
         true
@@ -155,21 +159,19 @@ impl Terminal {
     /// When `bulk` is set, a whole word is removed.
     pub fn type_out(&mut self, bulk: bool) {
         let cur = self.cmdline_cursor as usize;
-        let len = self.cmdline_len as usize;
 
         if cur == 0 {
             return;
         }
 
-        let count = if bulk {
-            cur - find_start_of_last_word(&self.cmdline[..cur])
+        let start = if bulk {
+            find_start_of_last_word(&self.cmdline[..cur])
         } else {
-            1
+            cur - 1
         };
 
-        self.cmdline.copy_within(cur..len, cur - count);
-        self.cmdline_cursor -= count as u8;
-        self.cmdline_len -= count as u8;
+        self.cmdline.remove_range(start..cur);
+        self.cmdline_cursor -= (cur - start) as u8;
 
         self.refresh_cmdline();
     }
@@ -185,23 +187,13 @@ impl Terminal {
     /// it fails when the internal buffer is full.
     #[must_use = "the function might've failed to take the scan-code"]
     pub fn buffer_scancode(&mut self, scancode: u8) -> bool {
-        match self
-            .scancode_buffer
-            .get_mut(self.scancode_buffer_len as usize)
-        {
-            Some(slot) => {
-                *slot = scancode;
-                self.scancode_buffer_len += 1;
-                true
-            }
-            None => false,
-        }
+        self.scancode_buffer.try_push(scancode).is_ok()
     }
 
     /// Takes a scan-code and processes it.
     ///
     /// This function ignores the internal buffer and processes the scan-code immediately.
-    pub fn take_scancode(&mut self, scancode: u8) {
+    pub fn take_scancode(&mut self, scancode: u8, readline: &mut dyn ReadLine) {
         let Some(c) = self.layout.advance(scancode) else {
             return;
         };
@@ -210,20 +202,37 @@ impl Terminal {
         match c {
             '\x08' => self.type_out(self.layout.modifiers().has_control()),
             'l' | 'L' if self.layout.modifiers().has_control() => self.reset(),
+            'c' | 'C' if self.layout.modifiers().has_control() => self.clear_cmdline(),
+            '\n' => {
+                readline.submit(self);
+                self.clear_cmdline();
+            }
+            '\t' => readline.auto_complete(self),
             _ => {
-                if let Some(vga_char) = VgaChar::from_char(c) {
-                    self.type_in(vga_char);
-                }
+                self.type_in(c as u8);
             }
         }
     }
 
     /// Processes the scan-codes that were buffered so far.
-    pub fn take_buffered_scancodes(&mut self) {
-        for i in 0..self.scancode_buffer_len {
-            self.take_scancode(self.scancode_buffer[i as usize]);
+    pub fn take_buffered_scancodes(&mut self, readline: &mut dyn ReadLine) {
+        for i in 0..self.scancode_buffer.len() {
+            let scancode = unsafe { *self.scancode_buffer.get_unchecked(i) };
+            self.take_scancode(scancode, readline);
         }
-        self.scancode_buffer_len = 0;
+        self.scancode_buffer.clear();
+    }
+
+    /// Returns an exclusive reference to the command-line buffer.
+    #[inline(always)]
+    pub fn cmdline_mut(&mut self) -> &mut ArrayVec<u8, { WIDTH as usize }> {
+        &mut self.cmdline
+    }
+
+    /// Returns a shared reference to the command-line buffer.
+    #[inline(always)]
+    pub fn cmdline(&self) -> &[u8] {
+        &self.cmdline
     }
 }
 
@@ -251,13 +260,13 @@ const CLEAR_VALUE: u16 = 0x0F00;
 /// Returns the index of the first character of the last word.
 ///
 /// If no word is found, 0 is returned.
-fn find_start_of_last_word(s: &[VgaChar]) -> usize {
+fn find_start_of_last_word(s: &[u8]) -> usize {
     let mut i = s.len();
 
     // Skip initial whitespaces.
     while i > 0 {
         i -= 1;
-        if s[i] != VgaChar::SPACE {
+        if s[i] != b' ' {
             break;
         }
     }
@@ -265,10 +274,20 @@ fn find_start_of_last_word(s: &[VgaChar]) -> usize {
     // Skip the last word.
     while i > 0 {
         i -= 1;
-        if s[i] == VgaChar::SPACE {
+        if s[i] == b' ' {
             return i + 1;
         }
     }
 
     i
+}
+
+/// Allows to customize the behavior of the terminal.
+#[allow(unused_variables)]
+pub trait ReadLine {
+    /// Called when the user submits the current command-line value.
+    fn submit(&mut self, term: &mut Terminal) {}
+
+    /// Called when the user requests help for the current command-line value.
+    fn auto_complete(&mut self, term: &mut Terminal) {}
 }

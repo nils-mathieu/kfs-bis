@@ -74,22 +74,13 @@ pub unsafe fn lidt(idt: &DescriptorTablePointer) {
     }
 }
 
-/// Reads the current value of the RFLAGS register.
-pub fn read_rflags() -> RFlags {
-    let mut value: u32;
-    unsafe {
-        asm!("pushf; pop {}", out(reg) value, options(nomem, preserves_flags));
-    }
-    RFlags::from_bits_retain(value)
-}
-
 bitflags! {
-    /// The flags in the RFLAGS register.
-    #[derive(Default, Clone, Copy)]
-    pub struct RFlags: u32 {
+    /// The flags in the EFLAGS register.
+    #[derive(Debug, Clone, Copy)]
+    pub struct EFlags: u32 {
         const CARRY = 1 << 0;
         const PARITY = 1 << 2;
-        const ADJUST = 1 << 4;
+        const AUXILIARY = 1 << 4;
         const ZERO = 1 << 6;
         const SIGN = 1 << 7;
         const TRAP = 1 << 8;
@@ -107,5 +98,17 @@ bitflags! {
         const VIRTUAL_INTERRUPT = 1 << 19;
         const VIRTUAL_INTERRUPT_PENDING = 1 << 20;
         const ID = 1 << 21;
+    }
+}
+
+impl EFlags {
+    /// Reads the current value of the EFLAGS register.
+    #[inline]
+    pub fn read() -> Self {
+        let flags: u32;
+        unsafe {
+            asm!("pushfd; pop {}", out(reg) flags, options(nomem, preserves_flags));
+        }
+        Self::from_bits_retain(flags)
     }
 }

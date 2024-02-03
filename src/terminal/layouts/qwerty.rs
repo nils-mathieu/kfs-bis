@@ -71,6 +71,10 @@ impl Qwerty {
                 self.modifiers.remove(Modifiers::LEFT_CONTROL);
                 None
             }
+            (Neutral, 0x3A) => {
+                self.modifiers.toggle(Modifiers::CAPS_LOCK);
+                None
+            }
             (E0, 0x1D) => {
                 self.modifiers.insert(Modifiers::RIGHT_CONTROL);
                 self.state = Neutral;

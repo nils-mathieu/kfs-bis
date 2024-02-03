@@ -1,4 +1,4 @@
-use super::instr::{cli, read_rflags, sti, RFlags};
+use super::instr::{cli, sti, EFlags};
 
 /// A simple type that automatically restores interrupt with dropped.
 pub struct RestoreInterrupts;
@@ -11,7 +11,7 @@ impl RestoreInterrupts {
     /// of [`RestoreInterrupts`] is returned. If interrupts are already disabled, this function
     /// returns `None`.
     pub fn without_interrupts() -> Option<Self> {
-        if read_rflags().intersects(RFlags::INTERRUPT) {
+        if EFlags::read().intersects(EFlags::INTERRUPT) {
             cli();
             Some(Self)
         } else {

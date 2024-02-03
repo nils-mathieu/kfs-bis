@@ -9,6 +9,8 @@ use core::sync::atomic::AtomicBool;
 use core::sync::atomic::AtomicPtr;
 use core::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 
+use crate::utility::RestoreInterrupts;
+
 /// An error that might occur while attempting to lock a mutex.
 pub struct CantLock {
     /// The location at which the mutex was locked.
@@ -34,7 +36,7 @@ impl Debug for CantLock {
 	            - it was locked at {}\n\
 	            - the attempt was made at {}\n\
 	            ",
-                self.attempt_at, self.locked_at
+                self.locked_at, self.attempt_at
             )
         }
 
@@ -155,9 +157,12 @@ impl<T: ?Sized> Mutex<T> {
     #[track_caller]
     #[inline]
     pub fn try_lock(&self) -> Result<MutexGuard<T>, CantLock> {
+        let without_interrupts = RestoreInterrupts::without_interrupts();
+
         self.raw.try_lock().map(move |()| MutexGuard {
             raw: &self.raw,
             value: unsafe { &mut *self.value.get() },
+            without_interrupts,
         })
     }
 
@@ -171,6 +176,19 @@ impl<T: ?Sized> Mutex<T> {
     pub fn lock(&self) -> MutexGuard<T> {
         self.try_lock().unwrap()
     }
+
+    /// Returns an exclusive reference to the protected value without locking or checking if
+    /// the mutex is locked.
+    ///
+    /// # Safety
+    ///
+    /// This function is wildly unsafe and should be used with caution. The caller must ensure
+    /// that no other part of the program is accessing the value while the reference is held.
+    #[inline(always)]
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn get_mut_unchecked(&self) -> &mut T {
+        unsafe { &mut *self.value.get() }
+    }
 }
 
 /// A guard that automatically releases the lock of a [`Mutex<T>`] when dropped.
@@ -179,6 +197,9 @@ pub struct MutexGuard<'a, T: ?Sized> {
     raw: &'a RawMutex,
     /// The value protected by the lock.
     value: &'a mut T,
+    /// If interrupts were previously disabled, this will restore the previous state
+    /// once the guard is dropped.
+    without_interrupts: Option<RestoreInterrupts>,
 }
 
 impl<T: ?Sized> Deref for MutexGuard<'_, T> {

@@ -1,0 +1,3 @@
+The following commands are available:
+ - help            display this help
+ - clear           clear the console

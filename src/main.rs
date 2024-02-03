@@ -10,20 +10,18 @@
 mod cpu;
 mod drivers;
 mod multiboot;
-mod sync;
 mod terminal;
 mod utility;
 
 use core::arch::asm;
+use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
-use crate::drivers::{pic, vga};
-use crate::utility::instr::sti;
-
-use self::sync::Mutex;
-use self::terminal::Terminal;
-use self::utility::instr::{cli, hlt};
+use self::drivers::{pic, vga};
+use self::terminal::{ReadLine, Terminal};
+use self::utility::instr::{cli, hlt, sti};
+use self::utility::Mutex;
 
 /// The global terminal. It needs to be locked in order to be used.
 static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
@@ -117,7 +115,24 @@ unsafe extern "C" fn entry_point2(_info: u32) {
 
     loop {
         hlt();
-        TERMINAL.lock().take_buffered_scancodes();
+        TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
+    }
+}
+
+/// A simple implementation of the `ReadLine` trait for the terminal.
+struct ReadLineImpl;
+
+impl ReadLine for ReadLineImpl {
+    fn submit(&mut self, term: &mut Terminal) {
+        match term.cmdline() {
+            b"help" => {
+                let _ = term.write_str(include_str!("help.txt"));
+            }
+            b"clear" => {
+                term.reset();
+            }
+            _ => (),
+        }
     }
 }
 
@@ -126,11 +141,23 @@ unsafe extern "C" fn entry_point2(_info: u32) {
 /// If the control flow of the kernel ever reaches this point, it means that something
 /// went terribly wrong and the kernel may be in an inconsistent state.
 #[panic_handler]
+#[inline(never)]
 fn die_and_catch_fire(info: &PanicInfo) -> ! {
-    TERMINAL.lock().set_color(vga::Color::Red);
-    printk!("{info}");
-
     cli();
+
+    // SAFETY:
+    //  We just made sure that no interrupts can occur, meaning that this mutable reference
+    //  at most overlaps with the current thread (if the lock was helf while the panic
+    //  occured). In that case, this operation is technically unsound. This should be fine,
+    //  however, as the kernel is about to die anyway. The chances that the compiler is able
+    //  to optimize this in a harmful way are slim.
+    let term = unsafe { TERMINAL.get_mut_unchecked() };
+
+    vga::cursor_hide();
+    term.set_color(vga::Color::Red);
+    term.clear_cmdline();
+    let _ = writeln!(term, "{info}");
+
     loop {
         hlt();
     }
