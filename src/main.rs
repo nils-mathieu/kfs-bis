@@ -5,9 +5,7 @@
 #![feature(asm_const)]
 #![feature(decl_macro)]
 #![feature(abi_x86_interrupt)]
-#![allow(dead_code)]
 
-mod cpu;
 mod drivers;
 mod multiboot;
 mod terminal;
@@ -18,8 +16,7 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
-use self::drivers::vga::VgaChar;
-use self::drivers::{pic, vga};
+use self::drivers::{ps2, vga};
 use self::terminal::{ReadLine, Terminal};
 use self::utility::instr::{cli, hlt, sti};
 use self::utility::Mutex;
@@ -105,18 +102,17 @@ unsafe extern "C" fn entry_point2(_info: u32) {
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
-    // Initialize the CPU.
-    cpu::gdt::init();
-    cpu::idt::init();
-    pic::init();
-    pic::set_irq_mask(!pic::Irqs::KEYBOARD);
-    sti();
-
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
 
     loop {
-        hlt();
-        TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
+        // Wait until the a character is available to read.
+        while !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
+            core::hint::spin_loop();
+        }
+
+        let mut term = TERMINAL.lock();
+        let _ = term.buffer_scancode(ps2::read_data());
+        term.take_buffered_scancodes(&mut ReadLineImpl);
     }
 }
 
@@ -138,15 +134,15 @@ impl ReadLine for ReadLineImpl {
             }
             b"font" => {
                 let _ = term.write_str("\nAvailable characters:\n");
-                for i in VgaChar::iter_all() {
+                for i in vga::VgaChar::iter_all() {
                     term.write_vga_char(i);
                 }
 
                 let _ = term.write_str("\n\nAvailable colors:\n");
                 for c in vga::Color::iter_all() {
                     term.set_color(c);
-                    term.write_vga_char(VgaChar::BLOCK);
-                    term.write_vga_char(VgaChar::BLOCK);
+                    term.write_vga_char(vga::VgaChar::BLOCK);
+                    term.write_vga_char(vga::VgaChar::BLOCK);
                 }
                 term.set_color(vga::Color::White);
                 term.insert_linefeed();
