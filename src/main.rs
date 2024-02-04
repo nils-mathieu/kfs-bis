@@ -236,7 +236,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
 
         let mut term = TERMINAL.lock();
         let _ = term.buffer_scancode(ps2::read_data());
-        TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
+        term.take_buffered_scancodes(&mut ReadLineImpl);
     }
 }
 
