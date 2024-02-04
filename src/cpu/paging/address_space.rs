@@ -60,6 +60,29 @@ impl<C: Context> AddressSpace<C> {
         core::mem::forget(self);
     }
 
+    /// Translates the provided virtual address to a physical address, if it is mapped.
+    pub fn translate(&self, virt: usize) -> Option<u32> {
+        let dir = unsafe { &*(self.context.map(self.root) as *const PageTable) };
+        let pde = &dir[PageTableIndex::extract_page_directory_index(virt)];
+
+        let pt = if !pde.is_present() {
+            return None;
+        } else if pde.is_huge_page() {
+            return Some(PageTableIndex::extract_4mib_offset(virt) + pde.address_4mib());
+        } else {
+            // The page is present. We need to continue reading the page table.
+            unsafe { &*(self.context.map(pde.address_4kib()) as *const PageTable) }
+        };
+
+        let pte = &pt[PageTableIndex::extract_page_table_index(virt)];
+
+        if pte.is_present() {
+            Some(PageTableIndex::extract_4kib_offset(virt) + pte.address_4kib())
+        } else {
+            None
+        }
+    }
+
     /// Maps a 4 KiB virtual page to a specific physical page.
     ///
     /// The flags of `entry` are properly dispatched to its parent entries.
@@ -124,7 +147,6 @@ impl<C: Context> AddressSpace<C> {
 
             unsafe {
                 let pta_ptr = self.context.map(pta) as *mut PageTable;
-                pta_ptr.write_bytes(0x00, 1);
                 &mut *pta_ptr
             }
         };
@@ -272,5 +294,5 @@ pub unsafe trait Context {
     /// The provided physical address must have been allocated by the same [`Context`] instance.
     /// Note that if paging is not yet enabled, this function should simply return the input
     /// address.
-    unsafe fn map(&mut self, physical: u32) -> *mut u8;
+    unsafe fn map(&self, physical: u32) -> *mut u8;
 }

@@ -55,7 +55,7 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
     term.clear_cmdline();
 
     // Write a message explaining what happened:
-    log!("\n\nKERNEL PANIC:\n{}", info);
+    log!("\n\nKERNEL PANIC:\n{}\n", info);
 
     let _ = writeln!(
         term,
@@ -101,7 +101,7 @@ pub fn die(error: &str) -> ! {
             "\nFATAL ERROR: {error}\n\nPress any key to restart the computer...\n",
         );
 
-        log!("FATAL ERROR: {error}");
+        log!("FATAL ERROR: {error}\n");
     }
 
     wait_any_key();

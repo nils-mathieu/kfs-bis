@@ -10,5 +10,8 @@ default = ["log_serial"]
 
 log_serial = []
 
+[profile.release]
+lto = true
+
 [dependencies]
 bitflags = "2"

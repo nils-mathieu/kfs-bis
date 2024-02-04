@@ -130,6 +130,12 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
+    log!(
+        "Kernel is running on stack: {:#x} -> {:#x}\n",
+        INIT_STACK.as_ptr() as usize,
+        INIT_STACK.as_ptr() as usize + INIT_STACK_SIZE
+    );
+
     // Get the name of the bootloader name.
     let bootloader_name = if info.flags.intersects(multiboot::InfoFlags::BOOTLOADER_NAME) {
         let name = CStr::from_ptr(info.bootloader_name);
@@ -158,12 +164,13 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         .map(|(start, end)| end - start)
         .sum::<u32>();
     let largest_segment = available_memory(memmap.clone())
-        .max_by_key(|&(_, len)| len)
+        .max_by_key(|&(start, end)| end - start)
         .unwrap_or_else(|| die("found no memory"));
-    let upper_bound = available_memory(memmap.clone())
+    let mut upper_bound = available_memory(memmap.clone())
         .map(|(_, end)| end)
         .max()
         .unwrap_or_else(|| die("found no memory"));
+    upper_bound = (upper_bound + 0xFFF) & !0xFFF;
     log!(
         "\
         Found {total_memory} of available memory.\n\
@@ -179,7 +186,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     let mut init_allocator =
         unsafe { InitAllocator::new(largest_segment.0 as usize, largest_segment.1 as usize) };
 
-    log!("Setting up the kernel's address-space (identity mapping)\n");
+    log!("Setting up the kernel's address-space (mapping up to {upper_bound:#x})\n");
     cpu::paging::init(&mut init_allocator, upper_bound);
 
     log!("Initializing the physical memory allocator...\n");

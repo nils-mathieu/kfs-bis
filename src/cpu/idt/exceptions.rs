@@ -2,6 +2,8 @@
 
 use core::arch::asm;
 
+use bitflags::bitflags;
+
 use super::InterruptStackFrame;
 
 pub extern "x86-interrupt" fn division_error(_stack_frame: InterruptStackFrame) {
@@ -77,14 +79,33 @@ pub extern "x86-interrupt" fn general_protection_fault(
     panic!(
         "\
         Received a GENERAL_PROTECTION_FAULT fault with error code {:#x}.\n\
-        > RIP = {:#x}\n\
-        > RSP = {:#x}\
+        > EIP = {:#x}\n\
+        > ESP = {:#x}\
         ",
         error_code, frame.ip, frame.sp,
     );
 }
 
-pub extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: u32) {
+bitflags! {
+    /// The error code received with a page fault.
+    #[derive(Clone, Copy, Debug)]
+    #[repr(transparent)]
+    pub struct PageFaultError: u32 {
+        /// Whether the page was present.
+        const PRESENT = 1 << 0;
+        /// Whether the page was written to. Otherwise, it was read from.
+        const WRITE = 1 << 1;
+        /// Whether the fault occured while the CPU was in ring 3.
+        const USER = 1 << 2;
+        /// One of the page directory or page table entries was malformed and included
+        /// some reserved bits.
+        const RESERVED_WRITE = 1 << 3;
+        /// Whether the fault was caused by an instruction fetch.
+        const INSTRUCTION_FETCH = 1 << 4;
+    }
+}
+
+pub extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code: PageFaultError) {
     let mut cr2: usize;
     unsafe {
         asm!("mov {}, cr2", out(reg) cr2, options(nostack, nomem, preserves_flags));
@@ -93,9 +114,9 @@ pub extern "x86-interrupt" fn page_fault(frame: InterruptStackFrame, error_code:
     panic!(
         "\
         Received a PAGE_FAULT fault.\n\
-        > ERROR   = {:#x}\n\
-        > RIP     = {:#x}\n\
-        > RSP     = {:#x}\n\
+        > ERROR   = {:?}\n\
+        > EIP     = {:#x}\n\
+        > ESP     = {:#x}\n\
         > ADDRESS = {:#x}\
         ",
         error_code, frame.ip, frame.sp, cr2,

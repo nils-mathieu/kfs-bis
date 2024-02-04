@@ -34,6 +34,7 @@ impl Allocator {
     ///
     /// This function panics if the allocator has not enough memory to store the
     /// page.
+    #[inline]
     pub fn deallocate(&mut self, page: u32) {
         assert!(
             self.len < self.pages.len(),

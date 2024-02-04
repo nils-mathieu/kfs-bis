@@ -4,10 +4,16 @@ use bitflags::bitflags;
 
 use crate::utility::instr::{inb, outb};
 
+/// The I/O port of the PS/2 controller command register.
+const COMMAND_PORT: u16 = 0x64;
+
+/// The I/O port of the PS/2 controller data register.
+const DATA_PORT: u16 = 0x60;
+
 /// Reads the status register of the PS/2 controller.
 #[inline]
 pub fn status() -> PS2Status {
-    let raw = unsafe { inb(0x64) };
+    let raw = unsafe { inb(COMMAND_PORT) };
     PS2Status::from_bits_retain(raw)
 }
 
@@ -23,7 +29,7 @@ pub fn is_output_buffer_full() -> bool {
 /// Sends a command to the PS/2 controller.
 #[inline]
 pub fn command(cmd: u8) {
-    unsafe { outb(0x64, cmd) }
+    unsafe { outb(COMMAND_PORT, cmd) }
 }
 
 /// Reads the data register of the PS/2 controller.
@@ -36,13 +42,13 @@ pub fn command(cmd: u8) {
 /// having received an interrupt from the PS/2 controller.
 #[inline]
 pub fn read_data() -> u8 {
-    unsafe { inb(0x60) }
+    unsafe { inb(DATA_PORT) }
 }
 
 /// Sends data to the PS/2 controller.
 #[inline]
 pub fn write_data(data: u8) {
-    unsafe { outb(0x60, data) }
+    unsafe { outb(DATA_PORT, data) }
 }
 
 bitflags! {

@@ -64,6 +64,13 @@ impl PageTableFlags {
     pub fn address_4kib(&self) -> u32 {
         self.bits() & !0xFFF
     }
+
+    /// Returns the 4 MiB-aligned address of the page table or page directory (depending
+    /// on the position).
+    #[inline(always)]
+    pub fn address_4mib(&self) -> u32 {
+        self.bits() & !0x3FFFFF
+    }
 }
 
 /// Represents a page table or page directory (depending on where it is located).
@@ -84,6 +91,26 @@ impl IndexMut<PageTableIndex> for PageTable {
     #[inline(always)]
     fn index_mut(&mut self, index: PageTableIndex) -> &mut Self::Output {
         unsafe { self.0.get_unchecked_mut(index.as_usize()) }
+    }
+}
+
+impl<'a> IntoIterator for &'a PageTable {
+    type Item = PageTableFlags;
+    type IntoIter = core::iter::Copied<core::slice::Iter<'a, PageTableFlags>>;
+
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter().copied()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut PageTable {
+    type Item = &'a mut PageTableFlags;
+    type IntoIter = core::slice::IterMut<'a, PageTableFlags>;
+
+    #[inline(always)]
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter_mut()
     }
 }
 
@@ -120,8 +147,14 @@ impl PageTableIndex {
     }
 
     /// Extracts the page offset of the provided virtual address.
-    #[inline]
-    pub fn extract_offset(virt_addr: usize) -> Self {
-        Self::new(virt_addr & 0xFFF)
+    #[inline(always)]
+    pub fn extract_4kib_offset(virt_addr: usize) -> u32 {
+        virt_addr as u32 & 0xFFF
+    }
+
+    /// Extracts the 4 MiB-aligned offset of the provided virtual address.
+    #[inline(always)]
+    pub fn extract_4mib_offset(virt_addr: usize) -> u32 {
+        virt_addr as u32 & 0x3FFFFF
     }
 }

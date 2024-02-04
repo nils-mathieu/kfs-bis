@@ -33,7 +33,7 @@ pub unsafe fn init(allocator: &mut InitAllocator, upper_bound: u32) {
         }
 
         #[inline]
-        unsafe fn map(&mut self, physical: u32) -> *mut u8 {
+        unsafe fn map(&self, physical: u32) -> *mut u8 {
             // At this point in the execution, we are setting up the kernel's address space, meaning
             // that paging is not yet initiating. Every "virtual" address is equal to its
             // physical address.
@@ -45,22 +45,30 @@ pub unsafe fn init(allocator: &mut InitAllocator, upper_bound: u32) {
 
     // Identity map the whole address space.
     address_space
-        .map_range(
-            0,
-            0,
-            (upper_bound as usize + 0xFFF) & !0xFFF,
-            PageTableFlags::WRITABLE,
-        )
+        .map_range(0, 0, upper_bound as usize, PageTableFlags::WRITABLE)
         .unwrap_or_else(|err| handle_mapping_error(err));
     let page_directory = address_space.page_directory();
     address_space.leak();
 
-    // Enable paging.
     asm!(
+        // Update the CR3 register with our page directory.
         "
         mov cr3, {page_directory}
         ",
+        // Make sure that the PSE is enabled (this is necessary to use 4MiB mappings).
+        "
+        mov {tmp}, cr4
+        or {tmp}, 0x00000010
+        mov cr4, {tmp}
+        ",
+        // Enable paging.
+        "
+        mov {tmp}, cr0
+        or {tmp}, 0x80000000
+        mov cr0, {tmp}
+        ",
         page_directory = in(reg) page_directory,
+        tmp = lateout(reg) _,
     );
 }
 
