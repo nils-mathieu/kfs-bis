@@ -16,6 +16,7 @@ mod cpu;
 mod die;
 mod drivers;
 mod multiboot;
+mod shell;
 mod state;
 mod terminal;
 mod utility;
@@ -26,13 +27,14 @@ use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
+use crate::shell::ReadLineImpl;
+
 use self::cpu::paging::{AddressSpace, Context, MappingError, PageTableFlags};
-use self::die::{oom, reset_cpu};
-use self::drivers::vga::VgaChar;
+use self::die::{die, oom};
 use self::drivers::{pic, vga};
 use self::multiboot::MultibootInfo;
-use self::state::{Allocator, Global, SystemInfo, GLOBAL};
-use self::terminal::{ReadLine, Terminal};
+use self::state::{Allocator, Global, SystemInfo};
+use self::terminal::Terminal;
 use self::utility::instr::{hlt, sti};
 use self::utility::{HumanBytes, InitAllocator, Mutex};
 
@@ -304,81 +306,6 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     loop {
         hlt();
         TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
-    }
-}
-
-/// A simple implementation of the `ReadLine` trait for the terminal.
-struct ReadLineImpl;
-
-/// The list of available commands.
-const COMMANDS: &[&str] = &["help", "clear", "font", "system", "panic", "restart"];
-
-impl ReadLine for ReadLineImpl {
-    fn submit(&mut self, term: &mut Terminal) {
-        let glob = GLOBAL.get().unwrap();
-
-        match term.cmdline() {
-            b"help" => {
-                term.insert_linefeed();
-                let _ = term.write_str(include_str!("help.txt"));
-            }
-            b"clear" => {
-                term.reset();
-            }
-            b"font" => {
-                let _ = term.write_str("\nAvailable characters:\n");
-                for i in VgaChar::iter_all() {
-                    term.write_vga_char(i);
-                }
-
-                let _ = term.write_str("\n\nAvailable colors:\n");
-                for c in vga::Color::iter_all() {
-                    term.set_color(c);
-                    term.write_vga_char(VgaChar::BLOCK);
-                    term.write_vga_char(VgaChar::BLOCK);
-                }
-                term.set_color(vga::Color::White);
-                term.insert_linefeed();
-            }
-            b"system" => {
-                let total_memory = glob.system_info.total_memory;
-                let remaining_memory = glob.allocator.lock().remaining_memory() as u64;
-
-                let _ = writeln!(
-                    term,
-                    "\n\
-                  	total memory: {memory} ({memory_b} bytes)\n\
-                    remaining memory: {remaining} ({remaining_b} bytes)\n\
-                   	",
-                    memory = HumanBytes(total_memory),
-                    memory_b = total_memory,
-                    remaining = HumanBytes(remaining_memory),
-                    remaining_b = remaining_memory,
-                );
-            }
-            b"panic" => {
-                panic!("why would they add this command in the first place???");
-            }
-            b"restart" => {
-                reset_cpu();
-            }
-            _ => (),
-        }
-    }
-
-    fn auto_complete(&mut self, term: &mut Terminal) {
-        if term.cmdline().is_empty() || term.cmdline_cursor() != term.cmdline().len() {
-            return;
-        }
-
-        for candidate in COMMANDS {
-            if candidate.as_bytes().starts_with(term.cmdline()) {
-                term.cmdline_mut().clear();
-                term.cmdline_mut().extend_from_slice(candidate.as_bytes());
-                term.set_cmdline_cursor(term.cmdline().len());
-                term.refresh_cmdline();
-            }
-        }
     }
 }
 
