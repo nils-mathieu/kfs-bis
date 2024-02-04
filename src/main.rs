@@ -7,7 +7,8 @@
     asm_const,
     decl_macro,
     abi_x86_interrupt,
-    panic_info_message
+    panic_info_message,
+    pointer_is_aligned
 )]
 #![allow(dead_code)]
 
@@ -18,12 +19,17 @@ mod state;
 mod terminal;
 mod utility;
 
+use core::alloc::Layout;
 use core::arch::asm;
 use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
+use crate::cpu::paging::{AddressSpace, Context, PageTableFlags};
+use crate::utility::InitAllocator;
+
+use self::cpu::paging::MappingError;
 use self::drivers::vga::VgaChar;
 use self::drivers::{pic, ps2, vga};
 use self::multiboot::MultibootInfo;
@@ -62,7 +68,7 @@ static MULTIBOOT_HEADER: multiboot::Header =
     multiboot::Header::new(multiboot::HeaderFlags::MEMORY_MAP);
 
 /// The size of the initial stack. See [`INIT_STACK`] for more information.
-const INIT_STACK_SIZE: usize = 0x8000;
+const INIT_STACK_SIZE: usize = 0x2000;
 /// The initial stack used up until a proper allocator is available. It should not need to be too
 /// large; just enough to get the kernel to a point where it can allocate physical memory
 /// dynamically.
@@ -155,6 +161,91 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     log!(
         "Found {} of available memory.\n",
         HumanBytes(available_memory)
+    );
+
+    // Find the largest available segment. Avoid memory under one megabyte as that's
+    // were a lot of available (but used!) memory is located. For example the VGA
+    // memory is down there.
+    let largest_segment = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
+        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
+        .map(|e| {
+            (
+                e.addr_low as u64 | (e.addr_high as u64) << 32,
+                e.len_low as u64 | (e.len_high as u64) << 32,
+            )
+        })
+        .filter(|&(addr, len)| addr >= 0x100000)
+        .max_by_key(|&(_, len)| len)
+        .unwrap_or_else(|| {
+            die("no available memory segment found above 1MB");
+        });
+    log!(
+        "Largest memory segment: {:#016x} -> {:#016x} ({})\n",
+        largest_segment.0,
+        largest_segment.0 + largest_segment.1,
+        HumanBytes(largest_segment.1)
+    );
+
+    // Make sure that the bounds of the largest segment are within the supported address
+    // space. This should generally be the case, but it's better to be safe than sorry.
+    if largest_segment.0 > u32::MAX as u64
+        || largest_segment.0.saturating_add(largest_segment.1) > u32::MAX as u64
+    {
+        die("the largest memory segment is not within the supported address space (4 GiB)");
+    }
+
+    // Create the boot allocator that will be used to set up everything else.
+    let mut init_allocator = unsafe {
+        InitAllocator::new(
+            largest_segment.0 as usize,
+            (largest_segment.0 + largest_segment.1) as usize,
+        )
+    };
+
+    log!("Setting up the kernel's address-space (identity mapping)\n");
+    struct InitContext<'a> {
+        init_allocator: &'a mut InitAllocator,
+    }
+
+    unsafe impl<'a> Context for InitContext<'a> {
+        #[inline]
+        fn allocate(&mut self) -> Result<u32, state::OutOfMemory> {
+            let layout = unsafe { Layout::from_size_align_unchecked(4096, 4096) };
+            self.init_allocator
+                .try_allocate_raw(layout)
+                .map(|addr| addr as u32)
+        }
+
+        unsafe fn deallocate(&mut self, page: u32) {
+            unreachable!("this Context implementation should never be used to deallocate pages");
+        }
+
+        #[inline]
+        unsafe fn map(&mut self, physical: u32) -> *mut u8 {
+            // At this point in the execution, we are setting up the kernel's address space, meaning
+            // that paging is not yet initiating. Every "virtual" address is equal to its
+            // physical address.
+            physical as *mut u8
+        }
+    }
+
+    let mut address_space = AddressSpace::new(InitContext {
+        init_allocator: &mut init_allocator,
+    })
+    .unwrap_or_else(|_| oom());
+
+    // Identity map the whole address space.
+    let upper_bound = (largest_segment.0 + largest_segment.1) as usize;
+    address_space
+        .map_range(0, 0, upper_bound & !0xFFF, PageTableFlags::WRITABLE)
+        .unwrap_or_else(|err| handle_mapping_error(err));
+
+    let remaining_memory = init_allocator.top() - init_allocator.base();
+    let used_memory = (largest_segment.0 + largest_segment.1) as usize - init_allocator.top();
+    log!(
+        "Finished utilizing the boot allocator (used: {}, remaining: {})\n",
+        HumanBytes(used_memory as u64),
+        HumanBytes(remaining_memory as u64)
     );
 
     // Write the global state.
@@ -303,6 +394,7 @@ fn die_and_catch_fire(info: &PanicInfo) -> ! {
 /// # Panics
 ///
 /// This function panics if the terminal is currently locked.
+#[cold]
 pub fn die(error: &str) -> ! {
     cli();
 
@@ -353,4 +445,17 @@ fn reset_cpu() -> ! {
     loop {
         hlt();
     }
+}
+
+/// Handle a mapping error occuring within the initialization routine.
+fn handle_mapping_error(err: MappingError) -> ! {
+    match err {
+        MappingError::OutOfMemory => oom(),
+        MappingError::AlreadyMapped => panic!("attempted to map a region that was already mapped"),
+    }
+}
+
+/// Kills the kernel with an appropriate message.
+fn oom() -> ! {
+    crate::die("please download more RAM");
 }

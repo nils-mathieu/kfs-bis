@@ -5,6 +5,8 @@ use core::fmt::Debug;
 
 use bitflags::bitflags;
 
+use crate::die;
+
 /// The magic number that the bootloader uses to determine whether the kernel is
 /// multiboot-compliant.
 pub const HEADER_MAGIC: u32 = 0x1BADB002;
@@ -215,6 +217,12 @@ pub unsafe fn iter_memory_map<'a>(
     core::iter::from_fn(move || {
         if total_offset >= length as usize {
             return None;
+        }
+
+        // Make sure that the cursor is properly
+        // aligned.
+        if !cur.is_aligned() {
+            die("found a mis-aligned memory map entry");
         }
 
         let ret = &*cur;

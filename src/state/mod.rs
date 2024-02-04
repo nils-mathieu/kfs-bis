@@ -1,9 +1,11 @@
 //! Defines the structures used in the kernel's global state.
 
+mod memory;
 mod system_info;
 
 use crate::utility::OnceCell;
 
+pub use self::memory::*;
 pub use self::system_info::*;
 
 /// The global state of the kernel.
