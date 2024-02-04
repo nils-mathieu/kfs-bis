@@ -26,10 +26,11 @@ use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
+use crate::shell::Shell;
+
 use self::die::{die, oom};
 use self::drivers::{pic, serial, vga};
 use self::multiboot::MultibootInfo;
-use self::shell::ReadLineImpl;
 use self::state::{Allocator, Global, SystemInfo};
 use self::terminal::Terminal;
 use self::utility::instr::{hlt, sti};
@@ -234,9 +235,11 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
 
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
 
+    let mut shell = Shell::default();
     loop {
         hlt();
-        TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
+        TERMINAL.lock().take_buffered_scancodes(&mut shell);
+        shell.run();
     }
 }
 

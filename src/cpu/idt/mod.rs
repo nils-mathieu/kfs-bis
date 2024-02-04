@@ -2,6 +2,7 @@
 
 mod exceptions;
 mod pic;
+mod syscall;
 
 use crate::utility::instr::{lidt, DescriptorTablePointer};
 
@@ -86,6 +87,8 @@ pub fn init() {
         IDT[45] = create_gate_descriptor(true, pic::fpu as usize);
         IDT[46] = create_gate_descriptor(true, pic::ata1 as usize);
         IDT[47] = create_gate_descriptor(true, pic::ata2 as usize);
+
+        IDT[0x80] = create_gate_descriptor(false, syscall::system_call as usize);
 
         lidt(&IDTP);
     }

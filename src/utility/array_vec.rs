@@ -7,6 +7,13 @@ pub struct ArrayVec<T, const N: usize> {
     len: u8,
 }
 
+impl<T, const N: usize> Default for ArrayVec<T, N> {
+    #[inline]
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T, const N: usize> ArrayVec<T, N> {
     const _ENSURE_CAPACITY: () = assert!(N <= 255, "ArrayVec must have a non-zero capacity");
 

@@ -5,6 +5,7 @@ The following commands are available:
  - system          print information about the system
  - panic           cause a kernel panic
  - restart         restarts the system
+ - syscall         performs a system call
 
 The following shortcuts are available:
  - Ctrl + C        clear the command-line

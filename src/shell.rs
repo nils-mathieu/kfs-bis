@@ -1,5 +1,6 @@
 //! Provides a simple shell implementation.
 
+use core::arch::asm;
 use core::fmt::Write;
 
 use crate::die::reset_cpu;
@@ -7,29 +8,40 @@ use crate::drivers::vga;
 use crate::state::GLOBAL;
 use crate::terminal::{ReadLine, Terminal};
 use crate::utility::HumanBytes;
+use crate::{printk, TERMINAL};
 
-/// A simple implementation of the `ReadLine` trait for the terminal.
-pub struct ReadLineImpl;
+/// A simple implementation of the [`ReadLine`] trait for the terminal.
+#[derive(Default)]
+pub struct Shell {
+    /// The index of the command to be executed.
+    to_execute: Option<usize>,
+}
+
+impl Shell {
+    /// Runs the shell.
+    pub fn run(&mut self) {
+        if let Some(to_execute) = self.to_execute.take() {
+            let (_, handler) = COMMANDS[to_execute];
+            handler();
+        }
+    }
+}
 
 /// The list of available commands.
 #[allow(clippy::type_complexity)]
-const COMMANDS: &[(&[u8], fn(&mut Terminal))] = &[
+const COMMANDS: &[(&[u8], fn())] = &[
     (b"help", help),
     (b"clear", clear),
     (b"font", font),
     (b"system", system),
     (b"panic", panic),
     (b"restart", restart),
+    (b"syscall", syscall),
 ];
 
-impl ReadLine for ReadLineImpl {
+impl ReadLine for Shell {
     fn submit(&mut self, term: &mut Terminal) {
-        for &(cmd, handler) in COMMANDS {
-            if term.cmdline() == cmd {
-                handler(term);
-                return;
-            }
-        }
+        self.to_execute = COMMANDS.iter().position(|&(cmd, _)| term.cmdline() == cmd);
     }
 
     fn auto_complete(&mut self, term: &mut Terminal) {
@@ -49,18 +61,21 @@ impl ReadLine for ReadLineImpl {
 }
 
 /// The `help` command.
-pub fn help(term: &mut Terminal) {
+pub fn help() {
+    let mut term = TERMINAL.lock();
     term.insert_linefeed();
     let _ = term.write_str(include_str!("help.txt"));
 }
 
 /// The `clear` command.
-pub fn clear(term: &mut Terminal) {
-    term.reset();
+pub fn clear() {
+    TERMINAL.lock().reset();
 }
 
 /// The `font` command.
-pub fn font(term: &mut Terminal) {
+pub fn font() {
+    let mut term = TERMINAL.lock();
+
     let _ = term.write_str("\nAvailable characters:\n");
     for i in vga::VgaChar::iter_all() {
         term.write_vga_char(i);
@@ -77,7 +92,7 @@ pub fn font(term: &mut Terminal) {
 }
 
 /// The `system` command.
-pub fn system(term: &mut Terminal) {
+pub fn system() {
     let glob = GLOBAL.get().unwrap();
 
     let total_memory = glob.system_info.total_memory;
@@ -89,8 +104,7 @@ pub fn system(term: &mut Terminal) {
         .map(|x| core::str::from_utf8(x).unwrap_or("<invalid utf-8>"))
         .unwrap_or("<unknown>");
 
-    let _ = writeln!(
-        term,
+    printk!(
         "\n\
         bootloader: {bootloader_name}
         \n\
@@ -105,11 +119,16 @@ pub fn system(term: &mut Terminal) {
 }
 
 /// The `panic` command.
-pub fn panic(_term: &mut Terminal) {
+pub fn panic() {
     panic!("why would they add this command in the first place???");
 }
 
 /// The `restart` command.
-pub fn restart(_term: &mut Terminal) {
+pub fn restart() {
     reset_cpu();
+}
+
+/// The `syscall` command.
+pub fn syscall() {
+    unsafe { asm!("int 0x80") };
 }
