@@ -18,7 +18,12 @@ pub unsafe extern "x86-interrupt" fn system_call(_stack_frame: InterruptStackFra
         //
         // The idea is to match the system call ABI of Linux, which is:
         "\
+        push edx
+        push ecx
+        push ebx
+        push eax
         call {}
+        add esp, 16
         iretd
         ",
         sym inner,
@@ -27,6 +32,13 @@ pub unsafe extern "x86-interrupt" fn system_call(_stack_frame: InterruptStackFra
 }
 
 /// The inner function of the system call handler.
-extern "C" fn inner() {
+extern "C" fn inner(sysno: u32, arg0: usize, arg1: usize, arg2: usize) -> usize {
     printk!("Received a system call interrupt!\n");
+    printk!("> sysno = {sysno:#x}\n");
+    printk!("> arg0  = {:#x}\n", arg0);
+    printk!("> arg1  = {:#x}\n", arg1);
+    printk!("> arg2  = {:#x}\n", arg2);
+
+    printk!("Returning 0x123...\n");
+    0x123
 }

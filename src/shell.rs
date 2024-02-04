@@ -130,5 +130,18 @@ pub fn restart() {
 
 /// The `syscall` command.
 pub fn syscall() {
-    unsafe { asm!("int 0x80") };
+    printk!("Sending syscall 0x1 with arguments 0x2, 0x3, 0x4\n");
+
+    let ret: u32;
+    unsafe {
+        asm!(
+            "int 0x80",
+            inlateout("eax") 0x1 => ret,
+            in("ebx") 0x2,
+            in("ecx") 0x3,
+            in("edx") 0x4,
+        );
+    }
+
+    printk!("syscall returned: {:#x}\n", ret);
 }
