@@ -174,7 +174,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
                 e.len_low as u64 | (e.len_high as u64) << 32,
             )
         })
-        .filter(|&(addr, len)| addr >= 0x100000)
+        .filter(|&(addr, _)| addr >= 0x100000)
         .max_by_key(|&(_, len)| len)
         .unwrap_or_else(|| {
             die("no available memory segment found above 1MB");
@@ -216,7 +216,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
                 .map(|addr| addr as u32)
         }
 
-        unsafe fn deallocate(&mut self, page: u32) {
+        unsafe fn deallocate(&mut self, _: u32) {
             unreachable!("this Context implementation should never be used to deallocate pages");
         }
 
@@ -239,6 +239,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     address_space
         .map_range(0, 0, upper_bound & !0xFFF, PageTableFlags::WRITABLE)
         .unwrap_or_else(|err| handle_mapping_error(err));
+    let page_directory = address_space.page_directory();
 
     let remaining_memory = init_allocator.top() - init_allocator.base();
     let used_memory = (largest_segment.0 + largest_segment.1) as usize - init_allocator.top();
@@ -246,6 +247,12 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         "Finished utilizing the boot allocator (used: {}, remaining: {})\n",
         HumanBytes(used_memory as u64),
         HumanBytes(remaining_memory as u64)
+    );
+
+    log!("Switching address space...\n");
+    asm!(
+        "mov cr3, {}",
+        in(reg) page_directory,
     );
 
     // Write the global state.
