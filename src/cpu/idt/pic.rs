@@ -11,7 +11,7 @@ pub extern "x86-interrupt" fn keyboard(_stack_frame: InterruptStackFrame) {
     // Check the status register of the PS/2 controller. When the interrupt is received, the
     // output buffer should be full. It's probably not necessary to check, but it's probably
     // a good idea.
-    if !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
+    if !ps2::is_output_buffer_full() {
         printk!(
             "\
         	WARN: a keyboard interrupt was received (IRQ1), but the output buffer\n\

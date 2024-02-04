@@ -11,6 +11,15 @@ pub fn status() -> PS2Status {
     PS2Status::from_bits_retain(raw)
 }
 
+/// Returns whether the output buffer of the PS/2 controller is full.
+///
+/// When this function returns `true`, it is okay to read from the data
+/// register.
+#[inline]
+pub fn is_output_buffer_full() -> bool {
+    status().intersects(PS2Status::OUTPUT_BUFFER_FULL)
+}
+
 /// Sends a command to the PS/2 controller.
 #[inline]
 pub fn command(cmd: u8) {

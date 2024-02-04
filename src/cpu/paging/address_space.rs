@@ -121,9 +121,12 @@ impl<C: Context> AddressSpace<C> {
 
             // And read it to get the page table address.
             let pta = pde.address_4kib();
-            let pta_ptr = unsafe { self.context.map(pta) as *mut PageTable };
 
-            unsafe { &mut *pta_ptr }
+            unsafe {
+                let pta_ptr = self.context.map(pta) as *mut PageTable;
+                pta_ptr.write_bytes(0x00, 1);
+                &mut *pta_ptr
+            }
         };
 
         let pte_index = PageTableIndex::extract_page_table_index(virt);

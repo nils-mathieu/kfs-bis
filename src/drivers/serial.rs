@@ -1,6 +1,6 @@
 //! A simple serial I/O driver.
 
-use crate::utility::instr::{inb, outb};
+use crate::utility::instr::{inb, outb, pause};
 use crate::utility::OnceCell;
 
 /// Whether the serial port has been initialized already.
@@ -118,7 +118,7 @@ impl Serial {
     /// to send more data.
     pub fn write_byte(self, byte: u8) {
         while !self.ready_to_send() {
-            core::hint::spin_loop();
+            pause();
         }
 
         unsafe {

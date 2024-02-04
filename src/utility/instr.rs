@@ -99,6 +99,17 @@ pub unsafe fn sidt() -> DescriptorTablePointer {
     idt
 }
 
+/// "Pauses" the CPU for a short period of time, saving power.
+///
+/// This function should be called when a "spin loop" is being executed to avoid
+/// using too much power while nothing is actually happening.
+#[inline(always)]
+pub fn pause() {
+    unsafe {
+        asm!("pause", options(nomem, preserves_flags, nostack));
+    }
+}
+
 bitflags! {
     /// The flags in the EFLAGS register.
     #[derive(Debug, Clone, Copy)]

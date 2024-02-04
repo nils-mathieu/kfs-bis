@@ -13,6 +13,7 @@
 #![allow(dead_code)]
 
 mod cpu;
+mod die;
 mod drivers;
 mod multiboot;
 mod state;
@@ -24,20 +25,16 @@ use core::arch::asm;
 use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
-use core::panic::PanicInfo;
 
-use crate::cpu::paging::{AddressSpace, Context, PageTableFlags};
-use crate::state::Allocator;
-use crate::utility::InitAllocator;
-
-use self::cpu::paging::MappingError;
+use self::cpu::paging::{AddressSpace, Context, MappingError, PageTableFlags};
+use self::die::{oom, reset_cpu};
 use self::drivers::vga::VgaChar;
-use self::drivers::{pic, ps2, vga};
+use self::drivers::{pic, vga};
 use self::multiboot::MultibootInfo;
-use self::state::{Global, SystemInfo, GLOBAL};
+use self::state::{Allocator, Global, SystemInfo, GLOBAL};
 use self::terminal::{ReadLine, Terminal};
-use self::utility::instr::{cli, hlt, outb, sti};
-use self::utility::{HumanBytes, Mutex};
+use self::utility::instr::{hlt, sti};
+use self::utility::{HumanBytes, InitAllocator, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
 static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
@@ -385,125 +382,10 @@ impl ReadLine for ReadLineImpl {
     }
 }
 
-/// This function is called when something in the kernel panics.
-///
-/// If the control flow of the kernel ever reaches this point, it means that something
-/// went terribly wrong and the kernel may be in an inconsistent state.
-#[panic_handler]
-#[cold]
-#[inline(never)]
-fn die_and_catch_fire(info: &PanicInfo) -> ! {
-    cli();
-
-    // SAFETY:
-    //  We just made sure that no interrupts can occur, meaning that this mutable reference
-    //  at most overlaps with the current thread (if the lock was helf while the panic
-    //  occured). In that case, this operation is technically unsound. This should be fine,
-    //  however, as the kernel is about to die anyway. The chances that the compiler is able
-    //  to optimize this in a harmful way are slim.
-    let term = unsafe { TERMINAL.get_mut_unchecked() };
-
-    vga::cursor_hide();
-    term.set_color(vga::Color::Red);
-    term.clear_cmdline();
-
-    // Write a message explaining what happened:
-    log!("\n\nKERNEL PANIC:\n{}", info);
-    let _ = writeln!(
-        term,
-        "\
-      	The kernel panicked unexpectedly. This is a serious bug in the operating\n\
-        system. Press any key in order to restart the computer.\n\
-        \n\
-        Please report this bug at: https://github.com/nils-mathieu/kfs
-        \n\
-        Additional information:\
-        "
-    );
-
-    if let Some(location) = info.location() {
-        let _ = writeln!(term, "> LOCATION: {}", location);
-    }
-
-    if let Some(msg) = info.message() {
-        let _ = writeln!(term, "> MESSAGE:\n{}", msg);
-    }
-
-    wait_any_key();
-    reset_cpu();
-}
-
-/// Function called when something in the kernel goes wrong, but without it being
-/// a bug.
-///
-/// For example, if the kernel cannot initialize itself because of a lack of working
-/// memory, this function will be called.
-///
-/// # Panics
-///
-/// This function panics if the terminal is currently locked.
-#[cold]
-pub fn die(error: &str) -> ! {
-    cli();
-
-    {
-        let mut term = TERMINAL.lock();
-        term.set_color(vga::Color::Red);
-        term.clear_cmdline();
-        let _ = writeln!(
-            term,
-            "\nFATAL ERROR: {error}\nPress any key to restart the computer...",
-        );
-        log!("FATAL ERROR: {error}");
-    }
-
-    wait_any_key();
-    reset_cpu();
-}
-
-/// Blocks the execution of the current thread until the user presses any key.
-///
-/// # Notes
-///
-/// This function expects interrupts to be disabled, and that no other part of the
-/// code is accessing the PS2 output buffer. Failing to meet those conditions might
-/// prevent the function from ever returning.
-fn wait_any_key() {
-    loop {
-        while !ps2::status().intersects(ps2::PS2Status::OUTPUT_BUFFER_FULL) {
-            core::hint::spin_loop();
-        }
-
-        // If the most significant bit is set, then the scancode is a MAKE code
-        // instead of a BREAK code. This avoid continuing unintentionally when
-        // the user releases a key.
-        if ps2::read_data() & 0x80 == 0 {
-            break;
-        }
-    }
-}
-
-/// Restarts the CPU.
-fn reset_cpu() -> ! {
-    // This is probably just triggering a tripple fault. The documentation online does not
-    // seem to agree on what this does exactly. The proper way to do this would be to
-    // use the ACPI.
-    unsafe { outb(0xCF9, 0xE) };
-
-    loop {
-        hlt();
-    }
-}
-
 /// Handle a mapping error occuring within the initialization routine.
 fn handle_mapping_error(err: MappingError) -> ! {
     match err {
         MappingError::OutOfMemory => oom(),
         MappingError::AlreadyMapped => panic!("attempted to map a region that was already mapped"),
     }
-}
-
-/// Kills the kernel with an appropriate message.
-fn oom() -> ! {
-    crate::die("please download more RAM");
 }
