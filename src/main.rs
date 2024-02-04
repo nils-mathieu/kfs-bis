@@ -26,13 +26,15 @@ use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
+use crate::drivers::ps2;
+use crate::utility::instr::pause;
+
 use self::die::{die, oom};
-use self::drivers::{pic, serial, vga};
+use self::drivers::{serial, vga};
 use self::multiboot::MultibootInfo;
 use self::shell::ReadLineImpl;
 use self::state::{Allocator, Global, SystemInfo};
 use self::terminal::Terminal;
-use self::utility::instr::{hlt, sti};
 use self::utility::{ArrayVec, HumanBytes, InitAllocator, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
@@ -149,9 +151,6 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     // Initialize the CPU and other hardware components.
     log!("Initializing the CPU...\n");
     cpu::gdt::init();
-    cpu::idt::init();
-    pic::init();
-    pic::set_irq_mask(!pic::Irqs::KEYBOARD);
 
     // Read the memory map.
     log!("Reading the memory map...\n");
@@ -226,16 +225,17 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         .ok()
         .expect("global state already initialized");
 
-    // Enable interrupts.
-    log!("Enabling interrupts...\n");
-    sti();
-
     log!("Kernel initialized.\n");
 
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
 
     loop {
-        hlt();
+        while !ps2::is_output_buffer_full() {
+            pause();
+        }
+
+        let mut term = TERMINAL.lock();
+        let _ = term.buffer_scancode(ps2::read_data());
         TERMINAL.lock().take_buffered_scancodes(&mut ReadLineImpl);
     }
 }
