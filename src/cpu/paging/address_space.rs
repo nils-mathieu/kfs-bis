@@ -130,7 +130,7 @@ impl<C: Context> AddressSpace<C> {
             }
 
             // Update the page directory entry.
-            *pde = flags | PageTableFlags::PRESENT | PageTableFlags::from_bits_retain(phys);
+            *pde = flags | PageTableFlags::PRESENT | PageTableFlags::from_bits_retain(pta);
 
             unsafe { &mut *pta_ptr }
         } else if pde.is_huge_page() {
@@ -143,12 +143,7 @@ impl<C: Context> AddressSpace<C> {
             update_flags(pde, flags);
 
             // And read it to get the page table address.
-            let pta = pde.address_4kib();
-
-            unsafe {
-                let pta_ptr = self.context.map(pta) as *mut PageTable;
-                &mut *pta_ptr
-            }
+            unsafe { &mut *(self.context.map(pde.address_4kib()) as *mut PageTable) }
         };
 
         let pte_index = PageTableIndex::extract_page_table_index(virt);
