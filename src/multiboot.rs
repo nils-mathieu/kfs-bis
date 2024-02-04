@@ -210,7 +210,7 @@ impl MemMapType {
 pub unsafe fn iter_memory_map<'a>(
     addr: *const MemMapEntry,
     length: u32,
-) -> impl Iterator<Item = &'a MemMapEntry> {
+) -> impl Clone + Iterator<Item = &'a MemMapEntry> {
     let mut cur = addr;
     let mut total_offset = 0usize;
 

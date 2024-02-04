@@ -1,4 +1,5 @@
 use core::alloc::Layout;
+use core::mem::MaybeUninit;
 
 use crate::oom;
 use crate::state::OutOfMemory;
@@ -73,14 +74,14 @@ impl InitAllocator {
 
     /// Allocates an instance of `T`.
     #[inline]
-    pub fn allocate<T>(&mut self) -> &'static mut T {
-        unsafe { &mut *self.allocate_raw(Layout::new::<T>()).cast::<T>() }
+    pub fn allocate<T>(&mut self) -> &'static mut MaybeUninit<T> {
+        unsafe { &mut *self.allocate_raw(Layout::new::<T>()).cast() }
     }
 
     /// Allocates a slice of `T`s.
-    pub fn allocate_slice<T>(&mut self, count: usize) -> &'static mut [T] {
+    pub fn allocate_slice<T>(&mut self, count: usize) -> &'static mut [MaybeUninit<T>] {
         let layout = Layout::array::<T>(count).unwrap_or_else(|_| oom());
-        let addr = self.allocate_raw(layout) as *mut T;
+        let addr = self.allocate_raw(layout) as *mut MaybeUninit<T>;
         unsafe { core::slice::from_raw_parts_mut(addr, count) }
     }
 

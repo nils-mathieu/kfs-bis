@@ -27,6 +27,7 @@ use core::mem::MaybeUninit;
 use core::panic::PanicInfo;
 
 use crate::cpu::paging::{AddressSpace, Context, PageTableFlags};
+use crate::state::Allocator;
 use crate::utility::InitAllocator;
 
 use self::cpu::paging::MappingError;
@@ -154,14 +155,11 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         TERMINAL.lock().set_color(vga::Color::Red);
         die("the bootloader did not provid a memory map");
     }
-    let available_memory = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
+    let total_memory = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
         .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
         .map(|e| e.len_low as u64 | (e.len_high as u64) << 32)
         .sum::<u64>();
-    log!(
-        "Found {} of available memory.\n",
-        HumanBytes(available_memory)
-    );
+    log!("Found {} of available memory.\n", HumanBytes(total_memory));
 
     // Find the largest available segment. Avoid memory under one megabyte as that's
     // were a lot of available (but used!) memory is located. For example the VGA
@@ -240,13 +238,48 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         .map_range(0, 0, upper_bound & !0xFFF, PageTableFlags::WRITABLE)
         .unwrap_or_else(|err| handle_mapping_error(err));
     let page_directory = address_space.page_directory();
+    address_space.leak();
 
-    let remaining_memory = init_allocator.top() - init_allocator.base();
+    log!("Initializing the physical memory allocator...\n");
+    // Go through the available segments and compute the total amount of memory
+    // that needs to be tracked.
+    let iter = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
+        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
+        .map(|e| {
+            (
+                e.addr_low as u64 | (e.addr_high as u64) << 32,
+                e.len_low as u64 | (e.len_high as u64) << 32,
+            )
+        })
+        .filter(|&(addr, _)| addr >= 0x100000 && addr <= u32::MAX as u64 - 0x1000)
+        .map(|(addr, len)| {
+            (
+                addr as u32,
+                addr.checked_add(len)
+                    .unwrap_or(u32::MAX as u64)
+                    .min(u32::MAX as u64) as u32,
+            )
+        })
+        .map(|(start, end)| ((start + 0xFFF) & !0xFFF, end & !0xFFF))
+        .flat_map(|(start, end)| (start..=end).step_by(0x1000));
+    let allocator_storage = init_allocator.allocate_slice(iter.clone().count());
+    log!(
+        "The allocator can track up to {} physical pages.\n",
+        allocator_storage.len()
+    );
+    let mut allocator = Allocator::new(allocator_storage);
+
+    for page in iter {
+        debug_assert!(page % 0x1000 == 0);
+        allocator.deallocate(page);
+    }
+
     let used_memory = (largest_segment.0 + largest_segment.1) as usize - init_allocator.top();
+    let remaining_memory = total_memory - used_memory as u64;
     log!(
         "Finished utilizing the boot allocator (used: {}, remaining: {})\n",
         HumanBytes(used_memory as u64),
-        HumanBytes(remaining_memory as u64)
+        HumanBytes(remaining_memory)
     );
 
     log!("Switching address space...\n");
@@ -259,7 +292,8 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     log!("Initilizing the global state...\n");
     crate::state::GLOBAL
         .set(Global {
-            system_info: SystemInfo { available_memory },
+            system_info: SystemInfo { total_memory },
+            allocator: Mutex::new(allocator),
         })
         .ok()
         .expect("global state already initialized");
@@ -310,12 +344,19 @@ impl ReadLine for ReadLineImpl {
                 term.insert_linefeed();
             }
             b"system" => {
+                let total_memory = glob.system_info.total_memory;
+                let remaining_memory = glob.allocator.lock().remaining_memory() as u64;
+
                 let _ = writeln!(
                     term,
                     "\n\
-                  	available memory: {memory}\n\
+                  	total memory: {memory} ({memory_b} bytes)\n\
+                    remaining memory: {remaining} ({remaining_b} bytes)\n\
                    	",
-                    memory = HumanBytes(glob.system_info.available_memory)
+                    memory = HumanBytes(total_memory),
+                    memory_b = total_memory,
+                    remaining = HumanBytes(remaining_memory),
+                    remaining_b = remaining_memory,
                 );
             }
             b"panic" => {
