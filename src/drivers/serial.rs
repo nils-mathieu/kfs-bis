@@ -1,10 +1,8 @@
 //! A simple serial I/O driver.
 
-use crate::utility::instr::{inb, outb, pause};
-use crate::utility::OnceCell;
+use bitflags::bitflags;
 
-/// Whether the serial port has been initialized already.
-static SERIAL: OnceCell<Serial> = OnceCell::new();
+use crate::utility::instr::{inb, outb, pause};
 
 /// Base address of the COM1 serial port used in this module for logging.
 const PORT: u16 = 0x3F8;
@@ -58,85 +56,83 @@ const DATA_TERMINAL_READY: u8 = 0x01;
 /// Controls the RTS pin when set on the modem-control register.
 const REQUEST_TO_SEND: u8 = 0x02;
 
-/// Set in the line-status register when the transmitter is not doing anything.
-const TRANSMITTER_EMPTY: u8 = 0x20;
+/// Initializes the serial port driver.
+pub fn init() {
+    // The following is adapted from the OSDev Wiki (this has to be the most copy-pasted code
+    // of the whole wiki lol).
+    //
+    //     https://wiki.osdev.org/Serial_Ports#Initialization
+    //     https://en.wikipedia.org/wiki/Serial_port
+    //
 
-/// Represents the serial port.
-#[derive(Clone, Copy)]
-pub struct Serial(());
+    // Make sure that the serial port won't attempt to send interrupts to the CPU. If we need
+    // to determine whether the serial port is ready to send data, we will poll it instead.
+    disable_interrupts();
 
-impl Serial {
-    /// Returns a [`Serial`] instance that has been initialized.
-    ///
-    /// If the serial port was already initialized previously, this function simply returns
-    /// the previous instance without re-initializing the serial port.
-    #[inline]
-    pub fn get() -> Self {
-        *SERIAL.get_or_init(Self::init_unchecked)
-    }
+    // Set the baud rate divisor to 3 (for a total of 38400 bauds).
+    // This is generally a good default for the use-case of simply logging messages.
+    set_baud_rate_divisor(3);
 
-    /// Initializes the serial port without checking if it has already been initialized previously.
-    ///
-    /// This is not unsafe, but initializing the serial port multiple times is a bit inefficient.
-    fn init_unchecked() -> Self {
-        // The following is adapted from the OSDev Wiki (this has to be the most copy-pasted code
-        // of the whole wiki lol).
-        //
-        //     https://wiki.osdev.org/Serial_Ports#Initialization
-        //     https://en.wikipedia.org/wiki/Serial_port
-        //
+    // Configure the serial port to use the default settings.
+    set_default_line_control();
 
-        // Make sure that the serial port won't attempt to send interrupts to the CPU. If we need
-        // to determine whether the serial port is ready to send data, we will poll it instead.
-        disable_interrupts();
+    // Enable the FIFO buffer of the serial port, with a 14-byte threshold.
+    enable_fifo();
 
-        // Set the baud rate divisor to 3 (for a total of 38400 bauds).
-        // This is generally a good default for the use-case of simply logging messages.
-        set_baud_rate_divisor(3);
+    // Finish the handshake with the serial port by writing the `DATA_TERMINAL_READY` and
+    // `REQUEST_TO_SEND` bits to the modem-control register.
+    // This is needed to actually enable the serial port.
+    finish_handshake();
+}
 
-        // Configure the serial port to use the default settings.
-        set_default_line_control();
-
-        // Enable the FIFO buffer of the serial port, with a 14-byte threshold.
-        enable_fifo();
-
-        // Finish the handshake with the serial port by writing the `DATA_TERMINAL_READY` and
-        // `REQUEST_TO_SEND` bits to the modem-control register.
-        // This is needed to actually enable the serial port.
-        finish_handshake();
-
-        Self(())
-    }
-
-    /// Returns whether the serial port is ready to send more data.
-    #[inline]
-    pub fn ready_to_send(self) -> bool {
-        unsafe { inb(LINE_STATUS) & TRANSMITTER_EMPTY != 0 }
-    }
-
-    /// Writes a byte to the serial port, eventually waiting for the transmitter to be ready
-    /// to send more data.
-    pub fn write_byte(self, byte: u8) {
-        while !self.ready_to_send() {
-            pause();
-        }
-
-        unsafe {
-            outb(PORT, byte);
-        }
-    }
-
-    /// Writes the provided bytes through the serial port.
-    pub fn write_bytes(self, bytes: &[u8]) {
-        for byte in bytes {
-            self.write_byte(*byte);
-        }
+bitflags! {
+    /// Defines the status bits for the serial port.
+    #[derive(Clone, Copy, Debug)]
+    pub struct SerialStatus: u8 {
+        /// Indicates that the transmitter is not doing anything. When this bit is set,
+        /// it's possible to write to the serial port without risking to lose data.
+        const TRANSMITTER_EMPTY = 0x20;
     }
 }
 
+/// Returns the current status of the serial port.
+#[inline]
+pub fn status() -> SerialStatus {
+    let raw = unsafe { inb(LINE_STATUS) };
+    SerialStatus::from_bits_retain(raw)
+}
+
+/// Returns whether the serial port is ready to send more data.
+#[inline]
+pub fn ready_to_send() -> bool {
+    status().intersects(SerialStatus::TRANSMITTER_EMPTY)
+}
+
+/// Writes a byte to the serial port, eventually waiting for the transmitter to be ready
+/// to send more data.
+pub fn write_byte(byte: u8) {
+    while !ready_to_send() {
+        pause();
+    }
+
+    unsafe {
+        outb(PORT, byte);
+    }
+}
+
+/// Writes the provided bytes through the serial port.
+pub fn write_bytes(bytes: &[u8]) {
+    bytes.iter().copied().for_each(write_byte);
+}
+
+/// A simple struct that implements [`core::fmt::Write`].
+#[derive(Debug, Clone, Copy)]
+pub struct Serial;
+
 impl core::fmt::Write for Serial {
+    #[inline]
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        self.write_bytes(s.as_bytes());
+        write_bytes(s.as_bytes());
         Ok(())
     }
 }
@@ -193,6 +189,7 @@ fn finish_handshake() {
 /// Only used in the log macro.
 #[doc(hidden)]
 #[cfg(feature = "log_serial")]
+#[inline]
 pub fn __log(msg: core::fmt::Arguments) {
-    let _ = core::fmt::Write::write_fmt(&mut Serial::get(), msg);
+    let _ = core::fmt::Write::write_fmt(&mut Serial, msg);
 }

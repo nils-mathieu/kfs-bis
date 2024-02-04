@@ -26,16 +26,14 @@ use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
-use crate::shell::ReadLineImpl;
-use crate::utility::ArrayVec;
-
 use self::die::{die, oom};
-use self::drivers::{pic, vga};
+use self::drivers::{pic, serial, vga};
 use self::multiboot::MultibootInfo;
+use self::shell::ReadLineImpl;
 use self::state::{Allocator, Global, SystemInfo};
 use self::terminal::Terminal;
 use self::utility::instr::{hlt, sti};
-use self::utility::{HumanBytes, InitAllocator, Mutex};
+use self::utility::{ArrayVec, HumanBytes, InitAllocator, Mutex};
 
 /// The global terminal. It needs to be locked in order to be used.
 static TERMINAL: Mutex<Terminal> = Mutex::new(Terminal::new(unsafe { vga::VgaBuffer::new() }));
@@ -128,6 +126,7 @@ unsafe extern "C" fn entry_point() {
 unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     // Initialize the terminal and set up the cursor. Doing this now avoid as much as possible
     // screen flickering while the kernel is initializing.
+    serial::init();
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
