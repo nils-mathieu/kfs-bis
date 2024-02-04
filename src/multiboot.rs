@@ -2,10 +2,9 @@
 
 use core::ffi::c_char;
 use core::fmt::Debug;
+use core::marker::PhantomData;
 
 use bitflags::bitflags;
-
-use crate::die;
 
 /// The magic number that the bootloader uses to determine whether the kernel is
 /// multiboot-compliant.
@@ -195,42 +194,65 @@ impl MemMapType {
     pub const DEFECTIVE: MemMapType = MemMapType(5);
 }
 
-/// Returns an iterator over the memory map entries.
-///
-/// # Arguments
-///
-/// - `addr`: The value of the `mmap_addr` field in the multiboot info structure.
-///
-/// - `length`: The value of the `mmap_length` field of the multiboot info structure.
-///
-/// # Safety
-///
-/// The provided arguments must be valid as specified in the multiboot protocol. The memory
-/// they reference must remain valid and borrowed for the lifetime `'a`.
-pub unsafe fn iter_memory_map<'a>(
+/// An iterator over the memory map entries.
+#[derive(Debug, Clone)]
+pub struct MemMapIter<'a> {
     addr: *const MemMapEntry,
     length: u32,
-) -> impl Clone + Iterator<Item = &'a MemMapEntry> {
-    let mut cur = addr;
-    let mut total_offset = 0usize;
+    total_offset: u32,
+    _lifetime: PhantomData<&'a ()>,
+}
 
-    core::iter::from_fn(move || {
-        if total_offset >= length as usize {
+impl<'a> MemMapIter<'a> {
+    /// Creates a new [`MemMapIter<'a>`] instance.
+    ///
+    /// # Arguments
+    ///
+    /// - `addr`: The value of the `mmap_addr` field in the multiboot info structure.
+    ///
+    /// - `length`: The value of the `mmap_length` field of the multiboot info structure.
+    ///
+    /// # Safety
+    ///
+    /// The provided arguments must be valid as specified in the multiboot protocol. The memory
+    /// they reference must remain valid and borrowed for the lifetime `'a`.
+    #[inline]
+    pub unsafe fn new(addr: *const MemMapEntry, length: u32) -> Self {
+        Self {
+            addr,
+            length,
+            total_offset: 0,
+            _lifetime: PhantomData,
+        }
+    }
+}
+
+impl<'a> Iterator for MemMapIter<'a> {
+    type Item = &'a MemMapEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.total_offset >= self.length {
             return None;
         }
 
-        // Make sure that the cursor is properly
-        // aligned.
-        if !cur.is_aligned() {
-            die("found a mis-aligned memory map entry");
-        }
+        let ret = unsafe { &*self.addr };
 
-        let ret = &*cur;
-
-        let skip_size = ret.size as usize + 4;
-        total_offset += skip_size;
-        cur = cur.byte_add(skip_size);
+        let skip_size = ret.size + 4;
+        self.total_offset += skip_size;
+        self.addr = unsafe { self.addr.byte_add(skip_size as usize) };
 
         Some(ret)
-    })
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        if self.total_offset >= self.length {
+            return (0, Some(0));
+        }
+
+        // The minimum size of the structure is 24 bytes. This means that at most
+        // `length / 24` entries can be read from the memory map.
+        let max = (self.length - self.total_offset) / 24;
+
+        (1, Some(max as usize))
+    }
 }

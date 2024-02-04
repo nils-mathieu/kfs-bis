@@ -19,6 +19,24 @@ impl<T, const N: usize> ArrayVec<T, N> {
         }
     }
 
+    /// Creates a new [`ArrayVec<T, N>`] from the provided slice.
+    ///
+    /// If the slice does not fit the capacity of the vector, the excess elements will be
+    /// truncated.
+    pub fn from_slice_truncated(mut slice: &[T]) -> Self
+    where
+        T: Copy,
+    {
+        slice = slice.get(..N).unwrap_or(slice);
+        let mut ret = Self::new();
+
+        unsafe {
+            ret.extend_from_slice_unchecked(slice);
+        }
+
+        ret
+    }
+
     /// Returns the current length of the vector.
     #[inline(always)]
     pub const fn len(&self) -> usize {

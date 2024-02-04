@@ -82,14 +82,22 @@ pub fn system(term: &mut Terminal) {
 
     let total_memory = glob.system_info.total_memory;
     let remaining_memory = glob.allocator.lock().remaining_memory() as u64;
+    let bootloader_name = glob
+        .system_info
+        .bootloader_name
+        .as_ref()
+        .map(|x| core::str::from_utf8(x).unwrap_or("<invalid utf-8>"))
+        .unwrap_or("<unknown>");
 
     let _ = writeln!(
         term,
         "\n\
+        bootloader: {bootloader_name}
+        \n\
       	total memory: {memory} ({memory_b} bytes)\n\
         remaining memory: {remaining} ({remaining_b} bytes)\n\
        	",
-        memory = HumanBytes(total_memory),
+        memory = HumanBytes(total_memory as u64),
         memory_b = total_memory,
         remaining = HumanBytes(remaining_memory),
         remaining_b = remaining_memory,

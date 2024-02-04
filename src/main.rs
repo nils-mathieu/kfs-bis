@@ -21,15 +21,14 @@ mod state;
 mod terminal;
 mod utility;
 
-use core::alloc::Layout;
 use core::arch::asm;
 use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
 
 use crate::shell::ReadLineImpl;
+use crate::utility::ArrayVec;
 
-use self::cpu::paging::{AddressSpace, Context, MappingError, PageTableFlags};
 use self::die::{die, oom};
 use self::drivers::{pic, vga};
 use self::multiboot::MultibootInfo;
@@ -117,8 +116,8 @@ unsafe extern "C" fn entry_point() {
         init_stack_ptr = sym INIT_STACK,
         init_stack_size = const INIT_STACK_SIZE,
         entry_point2 = sym entry_point2,
-        options(noreturn)
-    )
+        options(noreturn),
+    );
 }
 
 /// The second entry point function of the kernel, called within [`entry_point`].
@@ -129,17 +128,18 @@ unsafe extern "C" fn entry_point() {
 unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     // Initialize the terminal and set up the cursor. Doing this now avoid as much as possible
     // screen flickering while the kernel is initializing.
-    log!("Initializing the terminal...\n");
     vga::cursor_show(15, 15);
     TERMINAL.lock().reset();
 
-    // Print information about the bootloader.
-    if info.flags.intersects(multiboot::InfoFlags::BOOTLOADER_NAME) {
+    // Get the name of the bootloader name.
+    let bootloader_name = if info.flags.intersects(multiboot::InfoFlags::BOOTLOADER_NAME) {
         let name = CStr::from_ptr(info.bootloader_name);
         log!("Bootloader: {:?}\n", name);
+        Some(name.to_bytes())
     } else {
         log!("Bootloader has not provided its name.\n");
-    }
+        None
+    };
 
     // Initialize the CPU and other hardware components.
     log!("Initializing the CPU...\n");
@@ -154,113 +154,41 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         TERMINAL.lock().set_color(vga::Color::Red);
         die("the bootloader did not provid a memory map");
     }
-    let total_memory = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
-        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
-        .map(|e| e.len_low as u64 | (e.len_high as u64) << 32)
-        .sum::<u64>();
-    log!("Found {} of available memory.\n", HumanBytes(total_memory));
-
-    // Find the largest available segment. Avoid memory under one megabyte as that's
-    // were a lot of available (but used!) memory is located. For example the VGA
-    // memory is down there.
-    let largest_segment = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
-        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
-        .map(|e| {
-            (
-                e.addr_low as u64 | (e.addr_high as u64) << 32,
-                e.len_low as u64 | (e.len_high as u64) << 32,
-            )
-        })
-        .filter(|&(addr, _)| addr >= 0x100000)
+    let memmap = multiboot::MemMapIter::new(info.mmap_addr, info.mmap_length);
+    let total_memory = available_memory(memmap.clone())
+        .map(|(start, end)| end - start)
+        .sum::<u32>();
+    let largest_segment = available_memory(memmap.clone())
         .max_by_key(|&(_, len)| len)
-        .unwrap_or_else(|| {
-            die("no available memory segment found above 1MB");
-        });
+        .unwrap_or_else(|| die("found no memory"));
+    let upper_bound = available_memory(memmap.clone())
+        .map(|(_, end)| end)
+        .max()
+        .unwrap_or_else(|| die("found no memory"));
     log!(
-        "Largest memory segment: {:#016x} -> {:#016x} ({})\n",
-        largest_segment.0,
-        largest_segment.0 + largest_segment.1,
-        HumanBytes(largest_segment.1)
+        "\
+        Found {total_memory} of available memory.\n\
+        Largest memory segment: {largest_start:#016x} -> {largest_stop:#016x} ({largest})\n\
+        ",
+        total_memory = HumanBytes(total_memory as u64),
+        largest_start = largest_segment.0,
+        largest_stop = largest_segment.1,
+        largest = HumanBytes((largest_segment.1 - largest_segment.0) as u64),
     );
 
-    // Make sure that the bounds of the largest segment are within the supported address
-    // space. This should generally be the case, but it's better to be safe than sorry.
-    if largest_segment.0 > u32::MAX as u64
-        || largest_segment.0.saturating_add(largest_segment.1) > u32::MAX as u64
-    {
-        die("the largest memory segment is not within the supported address space (4 GiB)");
-    }
-
     // Create the boot allocator that will be used to set up everything else.
-    let mut init_allocator = unsafe {
-        InitAllocator::new(
-            largest_segment.0 as usize,
-            (largest_segment.0 + largest_segment.1) as usize,
-        )
-    };
+    let mut init_allocator =
+        unsafe { InitAllocator::new(largest_segment.0 as usize, largest_segment.1 as usize) };
 
     log!("Setting up the kernel's address-space (identity mapping)\n");
-    struct InitContext<'a> {
-        init_allocator: &'a mut InitAllocator,
-    }
-
-    unsafe impl<'a> Context for InitContext<'a> {
-        #[inline]
-        fn allocate(&mut self) -> Result<u32, state::OutOfMemory> {
-            let layout = unsafe { Layout::from_size_align_unchecked(4096, 4096) };
-            self.init_allocator
-                .try_allocate_raw(layout)
-                .map(|addr| addr as u32)
-        }
-
-        unsafe fn deallocate(&mut self, _: u32) {
-            unreachable!("this Context implementation should never be used to deallocate pages");
-        }
-
-        #[inline]
-        unsafe fn map(&mut self, physical: u32) -> *mut u8 {
-            // At this point in the execution, we are setting up the kernel's address space, meaning
-            // that paging is not yet initiating. Every "virtual" address is equal to its
-            // physical address.
-            physical as *mut u8
-        }
-    }
-
-    let mut address_space = AddressSpace::new(InitContext {
-        init_allocator: &mut init_allocator,
-    })
-    .unwrap_or_else(|_| oom());
-
-    // Identity map the whole address space.
-    let upper_bound = (largest_segment.0 + largest_segment.1) as usize;
-    address_space
-        .map_range(0, 0, upper_bound & !0xFFF, PageTableFlags::WRITABLE)
-        .unwrap_or_else(|err| handle_mapping_error(err));
-    let page_directory = address_space.page_directory();
-    address_space.leak();
+    cpu::paging::init(&mut init_allocator, upper_bound);
 
     log!("Initializing the physical memory allocator...\n");
     // Go through the available segments and compute the total amount of memory
     // that needs to be tracked.
-    let iter = multiboot::iter_memory_map(info.mmap_addr, info.mmap_length)
-        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
-        .map(|e| {
-            (
-                e.addr_low as u64 | (e.addr_high as u64) << 32,
-                e.len_low as u64 | (e.len_high as u64) << 32,
-            )
-        })
-        .filter(|&(addr, _)| addr >= 0x100000 && addr <= u32::MAX as u64 - 0x1000)
-        .map(|(addr, len)| {
-            (
-                addr as u32,
-                addr.checked_add(len)
-                    .unwrap_or(u32::MAX as u64)
-                    .min(u32::MAX as u64) as u32,
-            )
-        })
+    let iter = available_memory(memmap)
         .map(|(start, end)| ((start + 0xFFF) & !0xFFF, end & !0xFFF))
-        .flat_map(|(start, end)| (start..=end).step_by(0x1000));
+        .flat_map(|(start, end)| (start..end).step_by(0x1000));
     let allocator_storage = init_allocator.allocate_slice(iter.clone().count());
     log!(
         "The allocator can track up to {} physical pages.\n",
@@ -273,25 +201,20 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         allocator.deallocate(page);
     }
 
-    let used_memory = (largest_segment.0 + largest_segment.1) as usize - init_allocator.top();
-    let remaining_memory = total_memory - used_memory as u64;
     log!(
         "Finished utilizing the boot allocator (used: {}, remaining: {})\n",
-        HumanBytes(used_memory as u64),
-        HumanBytes(remaining_memory)
-    );
-
-    log!("Switching address space...\n");
-    asm!(
-        "mov cr3, {}",
-        in(reg) page_directory,
+        HumanBytes((largest_segment.1 - init_allocator.top() as u32) as u64),
+        HumanBytes((total_memory - (largest_segment.1 - init_allocator.top() as u32)) as u64)
     );
 
     // Write the global state.
     log!("Initilizing the global state...\n");
     crate::state::GLOBAL
         .set(Global {
-            system_info: SystemInfo { total_memory },
+            system_info: SystemInfo {
+                total_memory,
+                bootloader_name: bootloader_name.map(ArrayVec::from_slice_truncated),
+            },
             allocator: Mutex::new(allocator),
         })
         .ok()
@@ -301,6 +224,8 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     log!("Enabling interrupts...\n");
     sti();
 
+    log!("Kernel initialized.\n");
+
     let _ = TERMINAL.lock().write_str(include_str!("welcome.txt"));
 
     loop {
@@ -309,10 +234,26 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     }
 }
 
-/// Handle a mapping error occuring within the initialization routine.
-fn handle_mapping_error(err: MappingError) -> ! {
-    match err {
-        MappingError::OutOfMemory => oom(),
-        MappingError::AlreadyMapped => panic!("attempted to map a region that was already mapped"),
-    }
+/// Returns an iterator over the segments that are available for use.
+fn available_memory(base: multiboot::MemMapIter) -> impl '_ + Clone + Iterator<Item = (u32, u32)> {
+    base
+        // Only keep memory that is marked as AVAILABLE.
+        .filter(|e| e.ty == multiboot::MemMapType::AVAILABLE)
+        // Convert the segments to a more convenient format.
+        .map(|e| {
+            (
+                e.addr_low as u64 | (e.addr_high as u64) << 32,
+                e.len_low as u64 | (e.len_high as u64) << 32,
+            )
+        })
+        // Memory bellow 1 MiB is usually used by some other hardware (such as VGA)
+        // and should be avoided. Also, memory above 4 GiB is not accessible on x86.
+        .filter(|&(addr, _)| addr >= 0x100000 && addr <= u32::MAX as u64)
+        // If the segment bleeds above the 4 GiB limit, truncate it.
+        .map(|(addr, len)| {
+            (
+                addr as u32,
+                addr.checked_add(len).unwrap_or(u32::MAX as u64) as u32,
+            )
+        })
 }
