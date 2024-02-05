@@ -20,6 +20,15 @@ bitflags! {
         const RIGHT_SHIFT = 1 << 3;
         /// Whether the **CAPS LOCK** key is currently active.
         const CAPS_LOCK = 1 << 4;
+        /// Whether the left **ALT** key is currently pressed.
+        const LEFT_ALT = 1 << 5;
+        /// Whether the right **ALT** key is currently pressed.
+        const RIGHT_ALT = 1 << 6;
+        /// Whether the **NUM LOCK** key is currently active.
+        ///
+        /// When it is active, the numeric keypad is in number mode. When it is inactive, the
+        /// numeric keypad is in arrow mode.
+        const NUM_LOCK = 1 << 7;
     }
 }
 
@@ -44,5 +53,17 @@ impl Modifiers {
     #[inline]
     pub fn has_shift(&self) -> bool {
         self.intersects(Modifiers::LEFT_SHIFT | Modifiers::RIGHT_SHIFT)
+    }
+
+    /// Whether any of the alt keys are currently pressed.
+    #[inline]
+    pub fn has_alt(&self) -> bool {
+        self.intersects(Modifiers::LEFT_ALT | Modifiers::RIGHT_ALT)
+    }
+
+    /// Returns whether the NUM LOCK key is currently active.
+    #[inline]
+    pub fn num_locked(&self) -> bool {
+        self.intersects(Modifiers::NUM_LOCK)
     }
 }

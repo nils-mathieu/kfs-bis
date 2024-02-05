@@ -16,6 +16,12 @@ pub struct Qwerty {
     modifiers: Modifiers,
     /// The current state of the state machine.
     state: State,
+
+    /// Whether the numlock key is currently pressed. This is necessary to avoid toggling
+    /// the NUM_LOCK state on key repeats.
+    numlock_repeating: bool,
+    /// Like `numlock`, but for the capslock key.
+    capslock_repeating: bool,
 }
 
 impl Qwerty {
@@ -24,6 +30,8 @@ impl Qwerty {
         Self {
             modifiers: Modifiers::empty(),
             state: State::Neutral,
+            numlock_repeating: false,
+            capslock_repeating: false,
         }
     }
 
@@ -40,12 +48,15 @@ impl Qwerty {
     pub fn advance(&mut self, scancode: u8) -> Option<char> {
         use State::*;
 
-        match (self.state, scancode) {
-            // Continue escape sequences.
-            (Neutral, 0xE0) => {
-                self.state = E0;
-                None
-            }
+        let st = self.state;
+
+        // Parse the current escape sequence.
+        self.state = match (st, scancode) {
+            (Neutral, 0xE0) => E0,
+            _ => Neutral,
+        };
+
+        match (st, scancode) {
             // Update modifiers.
             (Neutral, 0x2A) => {
                 self.modifiers.insert(Modifiers::LEFT_SHIFT);
@@ -72,17 +83,49 @@ impl Qwerty {
                 None
             }
             (Neutral, 0x3A) => {
-                self.modifiers.toggle(Modifiers::CAPS_LOCK);
+                if !self.capslock_repeating {
+                    self.capslock_repeating = true;
+                    self.modifiers.toggle(Modifiers::CAPS_LOCK);
+                }
+                None
+            }
+            (Neutral, 0xBA) => {
+                self.capslock_repeating = false;
                 None
             }
             (E0, 0x1D) => {
                 self.modifiers.insert(Modifiers::RIGHT_CONTROL);
-                self.state = Neutral;
                 None
             }
             (E0, 0x9D) => {
                 self.modifiers.remove(Modifiers::RIGHT_CONTROL);
-                self.state = Neutral;
+                None
+            }
+            (Neutral, 0x38) => {
+                self.modifiers.insert(Modifiers::LEFT_ALT);
+                None
+            }
+            (Neutral, 0xB8) => {
+                self.modifiers.remove(Modifiers::LEFT_ALT);
+                None
+            }
+            (E0, 0x38) => {
+                self.modifiers.insert(Modifiers::RIGHT_ALT);
+                None
+            }
+            (E0, 0xB8) => {
+                self.modifiers.remove(Modifiers::RIGHT_ALT);
+                None
+            }
+            (Neutral, 0x45) => {
+                if !self.numlock_repeating {
+                    self.numlock_repeating = true;
+                    self.modifiers.toggle(Modifiers::NUM_LOCK);
+                }
+                None
+            }
+            (Neutral, 0xC5) => {
+                self.numlock_repeating = false;
                 None
             }
             // Printable characters.
@@ -179,10 +222,22 @@ impl Qwerty {
             (Neutral, 0x34) if !self.modifiers.shifted() => Some('.'),
             (Neutral, 0x34) if self.modifiers.shifted() => Some('>'),
             (Neutral, 0x35) if !self.modifiers.shifted() => Some('/'),
+            (E0, 0x35) => Some('/'),
             (Neutral, 0x35) if self.modifiers.shifted() => Some('?'),
+            (Neutral, 0x47) if self.modifiers.num_locked() => Some('7'),
+            (Neutral, 0x48) if self.modifiers.num_locked() => Some('8'),
+            (Neutral, 0x49) if self.modifiers.num_locked() => Some('9'),
+            (Neutral, 0x4B) if self.modifiers.num_locked() => Some('4'),
+            (Neutral, 0x4C) if self.modifiers.num_locked() => Some('5'),
+            (Neutral, 0x4D) if self.modifiers.num_locked() => Some('6'),
+            (Neutral, 0x4F) if self.modifiers.num_locked() => Some('1'),
+            (Neutral, 0x50) if self.modifiers.num_locked() => Some('2'),
+            (Neutral, 0x51) if self.modifiers.num_locked() => Some('3'),
+            (Neutral, 0x52) if self.modifiers.num_locked() => Some('0'),
+            (Neutral, 0x53) if self.modifiers.num_locked() => Some('.'),
             // Non-printable keys
             (Neutral, 0x39) => Some(' '),
-            (Neutral, 0x1C) => Some('\n'),
+            (Neutral | E0, 0x1C) => Some('\n'),
             (Neutral, 0x0E) => Some('\x08'),
             (Neutral, 0x0F) => Some('\t'),
             _ => None,
