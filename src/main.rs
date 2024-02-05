@@ -26,7 +26,9 @@ use core::arch::asm;
 use core::ffi::CStr;
 use core::fmt::Write;
 use core::mem::MaybeUninit;
+use core::sync::atomic::AtomicU32;
 
+use crate::drivers::pit;
 use crate::shell::Shell;
 use crate::state::{Process, Processes};
 
@@ -154,7 +156,8 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
     cpu::gdt::init();
     cpu::idt::init();
     pic::init();
-    pic::set_irq_mask(!pic::Irqs::KEYBOARD);
+    pic::set_irq_mask(!(pic::Irqs::KEYBOARD | pic::Irqs::TIMER));
+    pit::init();
 
     // Read the memory map.
     log!("Reading the memory map...\n");
@@ -225,6 +228,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
             system_info: SystemInfo {
                 total_memory,
                 bootloader_name: bootloader_name.map(ArrayVec::from_slice_truncated),
+                tick_count: AtomicU32::new(0),
             },
             allocator: Mutex::new(allocator),
             processes: Mutex::new(processes),

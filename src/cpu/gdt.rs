@@ -2,6 +2,7 @@
 
 use core::arch::asm;
 
+use crate::log;
 use crate::utility::instr::{lgdt, DescriptorTablePointer};
 
 /// The address at which the GDT must be loaded.

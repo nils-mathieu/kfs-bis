@@ -1,13 +1,25 @@
+use core::sync::atomic::Ordering::Relaxed;
+
 use crate::drivers::{pic, ps2};
+use crate::state::GLOBAL;
 use crate::{printk, TERMINAL};
 
 use super::InterruptStackFrame;
 
-pub extern "x86-interrupt" fn timer(_stack_frame: InterruptStackFrame) {
-    panic!("Received a TIMER interrupt (IRQ0).");
+pub unsafe extern "x86-interrupt" fn timer(_stack_frame: InterruptStackFrame) {
+    let glob = GLOBAL.get_unchecked();
+
+    // Update the global tick count.
+    // NOTE: this can overflow. We should determine whether this should be an error
+    // or if it's okay to just let it overflow. For now, let's just crash to avoid
+    // potential issues.
+    let old_value = glob.system_info.tick_count.fetch_add(1, Relaxed);
+    assert!(old_value != u32::MAX, "The tick count overflowed.");
+
+    pic::end_of_interrupt(pic::Irq::Timer);
 }
 
-pub extern "x86-interrupt" fn keyboard(_stack_frame: InterruptStackFrame) {
+pub unsafe extern "x86-interrupt" fn keyboard(_stack_frame: InterruptStackFrame) {
     // Check the status register of the PS/2 controller. When the interrupt is received, the
     // output buffer should be full. It's probably not necessary to check, but it's probably
     // a good idea.
