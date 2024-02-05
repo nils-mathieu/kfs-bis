@@ -1,13 +1,17 @@
 //! Defines the structures used in the kernel's global state.
 
 mod allocator;
+mod process;
 mod system_info;
+mod user;
 
 use crate::utility::Mutex;
 use crate::utility::OnceCell;
 
 pub use self::allocator::*;
+pub use self::process::*;
 pub use self::system_info::*;
+pub use self::user::*;
 
 /// The global state of the kernel.
 ///
