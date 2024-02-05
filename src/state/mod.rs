@@ -21,6 +21,8 @@ pub struct Global {
     pub system_info: SystemInfo,
     /// The physical memory allocator.
     pub allocator: Mutex<Allocator>,
+    /// The list of all processes.
+    pub processes: Mutex<Processes>,
 }
 
 /// The global state of the kernel.

@@ -1,6 +1,38 @@
-use core::ops::{Index, IndexMut};
+use core::mem::MaybeUninit;
+
+use crate::utility::InitAllocator;
 
 use super::UserId;
+
+/// A list of processes.
+pub struct Processes {
+    /// The processes entries.
+    ///
+    /// Indices into the list are the IDs of the processes.
+    processes: &'static mut [Option<Process>],
+    /// The ID of the current process.
+    ///
+    /// This is *always* valid, as there is always a running process.
+    current: ProcessId,
+}
+
+impl Processes {
+    /// Creates a new [`Process`] instance.
+    pub fn new(allocator: &mut InitAllocator, init: Process) -> Self {
+        let processes = allocator.allocate_slice::<Option<Process>>(1024);
+        for p in processes.iter_mut() {
+            p.write(None);
+        }
+
+        let processes = unsafe { MaybeUninit::slice_assume_init_mut(processes) };
+        processes[0] = Some(init);
+
+        Self {
+            processes,
+            current: 0,
+        }
+    }
+}
 
 /// The ID of the process.
 pub type ProcessId = u32;
@@ -15,7 +47,19 @@ pub struct Process {
     pub owner: UserId,
 }
 
+impl Process {
+    /// Creates a new empty [`Process`] instance.
+    pub fn new(parent: ProcessId, owner: UserId) -> Self {
+        Self {
+            parent,
+            signals: Signals::default(),
+            owner,
+        }
+    }
+}
+
 /// A list of received signal.
+#[derive(Default)]
 pub struct Signals {
     /// The list of signals that were received by the process.
     received: [Option<ReceivedSignal>; Signal::COUNT],

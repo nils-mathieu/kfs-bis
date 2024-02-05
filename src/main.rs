@@ -3,6 +3,7 @@
 #![feature(
     naked_functions,
     maybe_uninit_uninit_array,
+    maybe_uninit_slice,
     const_maybe_uninit_uninit_array,
     asm_const,
     decl_macro,
@@ -27,6 +28,7 @@ use core::fmt::Write;
 use core::mem::MaybeUninit;
 
 use crate::shell::Shell;
+use crate::state::{Process, Processes};
 
 use self::die::{die, oom};
 use self::drivers::{pic, serial, vga};
@@ -208,6 +210,8 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
         allocator.deallocate(page);
     }
 
+    let processes = Processes::new(&mut init_allocator, Process::new(0, 0));
+
     log!(
         "Finished utilizing the boot allocator (used: {}, remaining: {})\n",
         HumanBytes((largest_segment.1 - init_allocator.top() as u32) as u64),
@@ -223,6 +227,7 @@ unsafe extern "C" fn entry_point2(info: &MultibootInfo) {
                 bootloader_name: bootloader_name.map(ArrayVec::from_slice_truncated),
             },
             allocator: Mutex::new(allocator),
+            processes: Mutex::new(processes),
         })
         .ok()
         .expect("global state already initialized");
