@@ -1,3 +1,5 @@
+use bitflags::bitflags;
+
 use super::Modifiers;
 
 /// The current state of the state machine.
@@ -10,18 +12,25 @@ enum State {
     E0,
 }
 
+bitflags! {
+    /// Some additional flags needed when parsing scancodes.
+    struct Flags: u8 {
+        /// Whether the numlock key is currently pressed. This is necessary to avoid toggling
+        /// the NUM_LOCK state on key repeats.
+        const NUMLOCK_REPEATING = 1 << 0;
+        /// Like `NUMLOCK_REPEATING`, but for the capslock key.
+        const CAPSLOCK_REPEATING = 1 << 1;
+    }
+}
+
 /// Contains the state required to convert scan-codes into text.
 pub struct Qwerty {
     /// The state of key modifiers.
     modifiers: Modifiers,
     /// The current state of the state machine.
     state: State,
-
-    /// Whether the numlock key is currently pressed. This is necessary to avoid toggling
-    /// the NUM_LOCK state on key repeats.
-    numlock_repeating: bool,
-    /// Like `numlock`, but for the capslock key.
-    capslock_repeating: bool,
+    /// Some additional flags.
+    flags: Flags,
 }
 
 impl Qwerty {
@@ -30,8 +39,7 @@ impl Qwerty {
         Self {
             modifiers: Modifiers::empty(),
             state: State::Neutral,
-            numlock_repeating: false,
-            capslock_repeating: false,
+            flags: Flags::empty(),
         }
     }
 
@@ -83,14 +91,14 @@ impl Qwerty {
                 None
             }
             (Neutral, 0x3A) => {
-                if !self.capslock_repeating {
-                    self.capslock_repeating = true;
+                if !self.flags.intersects(Flags::CAPSLOCK_REPEATING) {
+                    self.flags.insert(Flags::CAPSLOCK_REPEATING);
                     self.modifiers.toggle(Modifiers::CAPS_LOCK);
                 }
                 None
             }
             (Neutral, 0xBA) => {
-                self.capslock_repeating = false;
+                self.flags.remove(Flags::CAPSLOCK_REPEATING);
                 None
             }
             (E0, 0x1D) => {
@@ -118,14 +126,14 @@ impl Qwerty {
                 None
             }
             (Neutral, 0x45) => {
-                if !self.numlock_repeating {
-                    self.numlock_repeating = true;
+                if !self.flags.intersects(Flags::NUMLOCK_REPEATING) {
+                    self.flags.insert(Flags::NUMLOCK_REPEATING);
                     self.modifiers.toggle(Modifiers::NUM_LOCK);
                 }
                 None
             }
             (Neutral, 0xC5) => {
-                self.numlock_repeating = false;
+                self.flags.remove(Flags::NUMLOCK_REPEATING);
                 None
             }
             // Printable characters.
