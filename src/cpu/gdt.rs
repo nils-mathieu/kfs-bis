@@ -13,26 +13,22 @@ pub const KERNEL_DATA_SEGMENT: u16 = 0x10;
 pub const KERNEL_CODE_SEGMENT: u16 = 0x08;
 
 /// The GDT that will be copied and loaded.
-const GDT: [u64; 7] = [
+const GDT: [u64; 5] = [
     // Null Segment
     0u64,
     // Kernel Mode Code Segment
     0x00cf9a000000ffff,
     // Kernel Mode Data Segment
     0x00cf92000000ffff,
-    // Kernel Mode Stack Segment
-    0x00cf92000000ffff,
     // User Mode Code Segment
     0x00cffa000000ffff,
     // User Mode Data Segment
-    0x00cff2000000ffff,
-    // User Mode Stack Segment
     0x00cff2000000ffff,
 ];
 
 /// The GDTP that will be loaded with `lgdt`.
 const GDTP: DescriptorTablePointer = DescriptorTablePointer {
-    limit: 7 * 8 - 1,
+    limit: 5 * 8 - 1,
     base: ADDRESS as *mut (),
 };
 
@@ -42,7 +38,7 @@ const GDTP: DescriptorTablePointer = DescriptorTablePointer {
 ///
 /// The memory address where the GDT is installed must not currently be in use.
 pub unsafe fn init() {
-    core::ptr::copy_nonoverlapping(GDT.as_ptr(), ADDRESS, 7);
+    core::ptr::copy_nonoverlapping(GDT.as_ptr(), ADDRESS, GDT.len());
 
     lgdt(&GDTP);
 
