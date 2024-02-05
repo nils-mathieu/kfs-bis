@@ -84,8 +84,8 @@ pub fn font() {
     let _ = term.write_str("\n\nAvailable colors:\n");
     for c in vga::Color::iter_all() {
         term.set_color(c);
-        term.write_vga_char(vga::VgaChar::BLOCK);
-        term.write_vga_char(vga::VgaChar::BLOCK);
+        term.write_vga_char(vga::VgaChar::FULL_BLOCK);
+        term.write_vga_char(vga::VgaChar::FULL_BLOCK);
     }
     term.set_color(vga::Color::White);
     term.insert_linefeed();

@@ -2,7 +2,7 @@ DEBUG_TARGET := target/target/debug/kfs
 RELEASE_TARGET := target/target/release/kfs
 TARGET := $(DEBUG_TARGET)
 
-QEMU_FLAGS := -machine type=pc-i440fx-3.1 -m 2G -serial stdio
+QEMU_FLAGS := -machine type=pc-i440fx-3.1 -m 100M -serial stdio
 CARGO_FLAGS :=
 
 ifeq ($(RELEASE), 1)
